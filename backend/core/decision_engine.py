@@ -4,7 +4,18 @@ StadiumOps AI — Decision Engine.
 Pure, stateless, rule-based functions that accept typed domain objects and
 return ranked Recommendation lists.  This module has zero knowledge of HTTP,
 FastAPI, or any web framework and can be imported and tested in isolation.
+
+Design Rationale
+----------------
+A rule-based engine was chosen over ML for several critical reasons:
+  1. **Auditability** — every output traces to a named rule and stated reason.
+  2. **Predictability** — identical inputs always produce identical outputs.
+  3. **Zero cold-start** — no training data, model drift, or GPU needed.
+  4. **Regulatory compliance** — stadium safety requires justifiable decisions.
 """
+
+import logging
+from typing import Final
 
 from backend.models.schemas import (
     ConfidenceLevel,
@@ -14,7 +25,19 @@ from backend.models.schemas import (
     IncidentReport,
     Recommendation,
     SeverityLevel,
+    WeatherContext,
 )
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ─────────────────────────────────────────────────────────────
+
+GATE_OVERLOAD_THRESHOLD: Final[float] = 80.0
+GATE_UNDERLOAD_THRESHOLD: Final[float] = 40.0
+LIGHTNING_CRITICAL_RADIUS_KM: Final[float] = 15.0
+HEAT_INDEX_DANGER_THRESHOLD: Final[float] = 40.0
+HIGH_OCCUPANCY_RATIO: Final[float] = 0.9
+MODERATE_OCCUPANCY_RATIO: Final[float] = 0.7
 
 
 # ── RULE 1 — Gate Load Balancing ─────────────────────────────────────────
@@ -35,10 +58,15 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
         A list of Recommendation objects (empty when no imbalance is found).
     """
     if not gates:
+        logger.debug("gate_load_balance: no gates provided, returning empty.")
         return []
 
-    overloaded_gates = [g for g in gates if g.capacity_percent > 80]
-    underloaded_gates = [g for g in gates if g.capacity_percent < 40]
+    overloaded_gates = [
+        g for g in gates if g.capacity_percent > GATE_OVERLOAD_THRESHOLD
+    ]
+    underloaded_gates = [
+        g for g in gates if g.capacity_percent < GATE_UNDERLOAD_THRESHOLD
+    ]
 
     if not overloaded_gates or not underloaded_gates:
         return []
@@ -72,6 +100,10 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
                 )
             )
 
+    logger.info(
+        "gate_load_balance: generated %d recommendation(s).",
+        len(recommendations),
+    )
     return recommendations
 
 
@@ -132,6 +164,13 @@ def triage_incident(report: IncidentReport) -> Recommendation:
         ),
     )
 
+    logger.info(
+        "triage_incident: type=%s severity=%s zone=%s",
+        report.type,
+        severity.value,
+        report.zone,
+    )
+
     return Recommendation(
         rule_id="triage_incident",
         severity=severity,
@@ -148,7 +187,7 @@ def triage_incident(report: IncidentReport) -> Recommendation:
 # ── RULE 3 — Weather Action ──────────────────────────────────────────────
 
 
-def weather_action(weather: "WeatherContext") -> list[Recommendation]:
+def weather_action(weather: WeatherContext) -> list[Recommendation]:
     """Evaluate current weather conditions and produce safety recommendations.
 
     Triggers:
@@ -166,7 +205,7 @@ def weather_action(weather: "WeatherContext") -> list[Recommendation]:
     """
     recommendations: list[Recommendation] = []
 
-    if weather.lightning_detected and weather.lightning_radius_km <= 15:
+    if weather.lightning_detected and weather.lightning_radius_km <= LIGHTNING_CRITICAL_RADIUS_KM:
         recommendations.append(
             Recommendation(
                 rule_id="weather_action",
@@ -183,7 +222,7 @@ def weather_action(weather: "WeatherContext") -> list[Recommendation]:
                 confidence=ConfidenceLevel.CERTAIN,
             )
         )
-    elif weather.lightning_detected and weather.lightning_radius_km > 15:
+    elif weather.lightning_detected and weather.lightning_radius_km > LIGHTNING_CRITICAL_RADIUS_KM:
         recommendations.append(
             Recommendation(
                 rule_id="weather_action",
@@ -201,7 +240,7 @@ def weather_action(weather: "WeatherContext") -> list[Recommendation]:
             )
         )
 
-    if weather.heat_index >= 40:
+    if weather.heat_index >= HEAT_INDEX_DANGER_THRESHOLD:
         recommendations.append(
             Recommendation(
                 rule_id="weather_action",
@@ -219,6 +258,10 @@ def weather_action(weather: "WeatherContext") -> list[Recommendation]:
             )
         )
 
+    if recommendations:
+        logger.info(
+            "weather_action: %d recommendation(s) triggered.", len(recommendations),
+        )
     return recommendations
 
 
@@ -286,6 +329,11 @@ def accessibility_routing(
             )
         )
 
+    if recommendations:
+        logger.info(
+            "accessibility_routing: %d recommendation(s) triggered.",
+            len(recommendations),
+        )
     return recommendations
 
 
@@ -324,7 +372,7 @@ def egress_plan(
 
     recommendations: list[Recommendation] = []
 
-    if occupancy_ratio >= 0.9:
+    if occupancy_ratio >= HIGH_OCCUPANCY_RATIO:
         recommendations.append(
             Recommendation(
                 rule_id="egress_plan",
@@ -343,7 +391,7 @@ def egress_plan(
                 confidence=ConfidenceLevel.CERTAIN,
             )
         )
-    elif occupancy_ratio >= 0.7:
+    elif occupancy_ratio >= MODERATE_OCCUPANCY_RATIO:
         recommendations.append(
             Recommendation(
                 rule_id="egress_plan",
@@ -378,4 +426,9 @@ def egress_plan(
             )
         )
 
+    logger.info(
+        "egress_plan: occupancy=%.0f%% severity=%s",
+        occupancy_ratio * 100,
+        recommendations[0].severity.value,
+    )
     return recommendations

@@ -90,6 +90,25 @@ body {
     outline-offset: 2px;
 }
 
+.skip-nav {
+    position: absolute;
+    top: -100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--color-accent);
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    z-index: 999;
+    text-decoration: none;
+    transition: top 0.2s ease;
+}
+
+.skip-nav:focus {
+    top: 10px;
+}
+
 /* ── Header ───────────────────────────────────────────────────────────── */
 
 .app-header {
