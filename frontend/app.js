@@ -11,7 +11,7 @@
 
     // ── Configuration ────────────────────────────────────────────────────
 
-    var API_BASE_URL = "https://smart-stadiums-tournament-operations-1vi2.onrender.com";
+    var API_BASE_URL = "https://smart-stadiums-tournament-operations-1.onrender.com";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
 
