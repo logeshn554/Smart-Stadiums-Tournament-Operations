@@ -6,18 +6,13 @@ __pycache__/
 # Environment
 .env
 
-# RSA keys (generated at runtime)
+# RSA keys (auto-generated at runtime)
 keys/
 
-# Coverage
+# Coverage & Test artifacts
 htmlcov/
 .coverage
 coverage.xml
-
-# Load test results
-results/
-
-# Pytest cache
 .pytest_cache/
 
 # Node
@@ -32,3 +27,7 @@ build/
 .idea/
 *.swp
 *.swo
+
+# OS
+.DS_Store
+Thumbs.db

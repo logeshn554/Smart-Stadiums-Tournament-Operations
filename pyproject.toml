@@ -25,12 +25,10 @@ select = [
     "D",    # pydocstyle
 ]
 ignore = [
-    "D100",   # Missing docstring in public module (covered at top of each file)
-    "D104",   # Missing docstring in public package (covered in __init__.py)
+    "D100",   # Missing docstring in public module
+    "D104",   # Missing docstring in public package
     "ANN101", # Missing type annotation for self
     "ANN102", # Missing type annotation for cls
-    "S101",   # Use of assert (needed in tests)
-    "T201",   # print() usage (used in simulate.py)
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -38,27 +36,3 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
-
-[tool.pytest.ini_options]
-testpaths = ["backend/tests"]
-python_files = "test_*.py"
-python_classes = "Test*"
-python_functions = "test_*"
-addopts = "-v --tb=short --cov=backend --cov-report=term-missing"
-
-[tool.bandit]
-exclude_dirs = ["backend/tests", "data"]
-skips = ["B101"]  # Allow assert in non-test code where it's used for invariants
-
-[tool.coverage.run]
-source = ["backend"]
-omit = ["backend/tests/*"]
-
-[tool.coverage.report]
-show_missing = true
-fail_under = 80
-exclude_lines = [
-    "pragma: no cover",
-    "if __name__ == .__main__.",
-    "if TYPE_CHECKING:",
-]

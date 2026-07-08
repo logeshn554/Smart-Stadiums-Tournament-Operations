@@ -52,7 +52,7 @@ app = FastAPI(
 
 _raw_origins = os.getenv(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:8000,http://127.0.0.1:8000,null",
+    "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,null",
 )
 allowed_origins = [
     origin.strip() for origin in _raw_origins.split(",") if origin.strip()
@@ -62,8 +62,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Accept"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)

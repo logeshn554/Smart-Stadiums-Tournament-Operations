@@ -508,11 +508,7 @@
      * @param {Object} payload - The stadium data payload.
      */
     function fetchPlaybook(payload) {
-        var apiKey = document.getElementById("gemini-api-key").value.trim();
         var headers = { "Content-Type": "application/json" };
-        if (apiKey) {
-            headers["X-Gemini-API-Key"] = apiKey;
-        }
 
         var playbookEmptyState = document.getElementById("playbook-empty-state");
         var playbookContent = document.getElementById("playbook-content");
@@ -632,19 +628,7 @@
     // Initialize tabindexes on load
     switchTab("rules");
 
-    // ── Gemini API Key persistence ───────────────────────────────────────
 
-    var apiKeyInput = document.getElementById("gemini-api-key");
-    if (apiKeyInput) {
-        var savedKey = localStorage.getItem("gemini_api_key");
-        if (savedKey) {
-            apiKeyInput.value = savedKey;
-        }
-        apiKeyInput.addEventListener("change", function () {
-            localStorage.setItem("gemini_api_key", apiKeyInput.value.trim());
-            showToast("Gemini API key updated.", "success");
-        });
-    }
 
     // ── Playbook Manual Button ───────────────────────────────────────────
 
@@ -682,11 +666,7 @@
             chatInput.value = "";
 
             // 2. Build backend request payload
-            var apiKey = document.getElementById("gemini-api-key").value.trim();
             var headers = { "Content-Type": "application/json" };
-            if (apiKey) {
-                headers["X-Gemini-API-Key"] = apiKey;
-            }
 
             var currentPayload = buildPayload();
             var chatPayload = {

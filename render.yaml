@@ -1,0 +1,36 @@
+# Render Blueprint — StadiumOps AI
+# Deploy both backend and frontend from one repo.
+# https://render.com/docs/blueprint-spec
+
+services:
+  # ── Backend: FastAPI Web Service ──────────────────────────────────────
+  - type: web
+    name: stadiumops-api
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false  # set manually in Render dashboard
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false  # set to your frontend URL after deploying
+      - key: APP_ENV
+        value: production
+      - key: RATE_LIMIT_BACKEND
+        value: memory
+    healthCheckPath: /api/health
+
+  # ── Frontend: Static Site ────────────────────────────────────────────
+  - type: web
+    name: stadiumops-dashboard
+    runtime: static
+    region: oregon
+    plan: free
+    buildCommand: echo "Static site — no build needed"
+    staticPublishPath: ./frontend
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
