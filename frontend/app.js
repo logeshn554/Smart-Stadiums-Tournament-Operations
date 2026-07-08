@@ -11,7 +11,7 @@
 
     // ── Configuration ────────────────────────────────────────────────────
 
-    var API_BASE_URL = "http://127.0.0.1:8000";
+    var API_BASE_URL = "";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
 
