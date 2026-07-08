@@ -17,6 +17,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from backend.api.routes import router
 
@@ -64,6 +65,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Accept"],
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ── Security headers middleware ───────────────────────────────────────

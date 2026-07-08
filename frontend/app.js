@@ -565,30 +565,72 @@
     // ── Tab Management ───────────────────────────────────────────────────
 
     var tabIds = ["rules", "playbook", "chat"];
-    tabIds.forEach(function (tabId) {
+
+    function switchTab(tabId) {
+        tabIds.forEach(function (tid) {
+            var btn = document.getElementById("tab-" + tid);
+            var content = document.getElementById("panel-" + tid);
+            if (btn) {
+                btn.classList.remove("active");
+                btn.setAttribute("aria-selected", "false");
+                btn.setAttribute("tabindex", "-1");
+            }
+            if (content) {
+                content.classList.remove("active");
+            }
+        });
+        var activeBtn = document.getElementById("tab-" + tabId);
+        if (activeBtn) {
+            activeBtn.classList.add("active");
+            activeBtn.setAttribute("aria-selected", "true");
+            activeBtn.setAttribute("tabindex", "0");
+        }
+        var activeContent = document.getElementById("panel-" + tabId);
+        if (activeContent) {
+            activeContent.classList.add("active");
+        }
+    }
+
+    function focusAndActivateTab(index) {
+        var tabId = tabIds[index];
+        switchTab(tabId);
+        var button = document.getElementById("tab-" + tabId);
+        if (button) {
+            button.focus();
+        }
+    }
+
+    tabIds.forEach(function (tabId, index) {
         var button = document.getElementById("tab-" + tabId);
         if (button) {
             button.addEventListener("click", function () {
-                tabIds.forEach(function (tid) {
-                    var btn = document.getElementById("tab-" + tid);
-                    var content = document.getElementById("panel-" + tid);
-                    if (btn) {
-                        btn.classList.remove("active");
-                        btn.setAttribute("aria-selected", "false");
-                    }
-                    if (content) {
-                        content.classList.remove("active");
-                    }
-                });
-                button.classList.add("active");
-                button.setAttribute("aria-selected", "true");
-                var activeContent = document.getElementById("panel-" + tabId);
-                if (activeContent) {
-                    activeContent.classList.add("active");
+                switchTab(tabId);
+            });
+
+            // Keyboard navigation (WAI-ARIA compliance)
+            button.addEventListener("keydown", function (e) {
+                var nextIndex;
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                    nextIndex = (index + 1) % tabIds.length;
+                    focusAndActivateTab(nextIndex);
+                    e.preventDefault();
+                } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                    nextIndex = (index - 1 + tabIds.length) % tabIds.length;
+                    focusAndActivateTab(nextIndex);
+                    e.preventDefault();
+                } else if (e.key === "Home") {
+                    focusAndActivateTab(0);
+                    e.preventDefault();
+                } else if (e.key === "End") {
+                    focusAndActivateTab(tabIds.length - 1);
+                    e.preventDefault();
                 }
             });
         }
     });
+
+    // Initialize tabindexes on load
+    switchTab("rules");
 
     // ── Gemini API Key persistence ───────────────────────────────────────
 

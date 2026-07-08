@@ -115,6 +115,8 @@ def create_access_token(
         "role": role,
         "iat": now,
         "exp": now + timedelta(minutes=TOKEN_EXPIRE_MINUTES),
+        "iss": "stadiumops-idp",
+        "aud": "stadiumops-api",
     }
     if extra_claims:
         payload.update(extra_claims)
@@ -138,7 +140,13 @@ def verify_token(token: str) -> dict[str, Any]:
             signature.
     """
     try:
-        payload = jwt.decode(token, PUBLIC_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            PUBLIC_KEY,
+            algorithms=[ALGORITHM],
+            audience="stadiumops-api",
+            issuer="stadiumops-idp",
+        )
         logger.debug("Verified JWT for sub=%s", payload.get("sub"))
         return payload
     except JWTError as exc:
