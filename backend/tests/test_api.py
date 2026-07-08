@@ -2,7 +2,7 @@
 Integration tests for the StadiumOps AI API layer.
 
 Uses FastAPI TestClient to validate endpoint behaviour including
-authentication, validation, response structure, security headers,
+JWT authentication, validation, response structure, security headers,
 rate limiting, HTML sanitisation, role-based access control,
 audit log, WebSocket connectivity, and sort edge cases.
 """
@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.api.routes import _audit_log, _rate_limit_store, _sort_recommendations
+from backend.core.auth import create_access_token
 from backend.models.schemas import ConfidenceLevel, Recommendation, SeverityLevel
 
 client = TestClient(app)
@@ -129,6 +130,74 @@ class TestAnalyzeEndpoint:
         payload["venue_id"] = "stadium-west"
         response = client.post("/api/analyze", json=payload)
         assert response.status_code == 200
+
+
+class TestJWTAuthentication:
+    """Tests for RS256 JWT authentication on /api/analyze."""
+
+    def test_valid_jwt_admin_succeeds(self) -> None:
+        """A valid admin JWT allows fire_smoke submission."""
+        token = create_access_token(role="admin", subject="test-admin")
+        payload = _full_valid_payload()
+        payload["incident"]["type"] = "fire_smoke"
+        payload["role"] = "viewer"  # body says viewer, but JWT says admin
+        response = client.post(
+            "/api/analyze",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+    def test_valid_jwt_viewer_blocked_for_fire_smoke(self) -> None:
+        """A valid viewer JWT blocks fire_smoke submission."""
+        token = create_access_token(role="viewer", subject="test-viewer")
+        payload = _full_valid_payload()
+        payload["incident"]["type"] = "fire_smoke"
+        payload["role"] = "admin"  # body says admin, but JWT overrides
+        response = client.post(
+            "/api/analyze",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+    def test_invalid_jwt_returns_401(self) -> None:
+        """A malformed JWT returns 401."""
+        payload = _full_valid_payload()
+        response = client.post(
+            "/api/analyze",
+            json=payload,
+            headers={"Authorization": "Bearer invalid.token.here"},
+        )
+        assert response.status_code == 401
+
+    def test_no_jwt_falls_back_to_role_field(self) -> None:
+        """When no JWT is provided, the role field in the payload is used."""
+        payload = _full_valid_payload()
+        payload["role"] = "admin"
+        response = client.post("/api/analyze", json=payload)
+        assert response.status_code == 200
+
+    def test_expired_jwt_returns_401(self) -> None:
+        """An expired JWT is rejected with 401."""
+        from datetime import datetime, timedelta, timezone
+        from jose import jwt as jose_jwt
+        from backend.core.auth import PRIVATE_KEY, ALGORITHM
+
+        expired_payload = {
+            "sub": "test-user",
+            "role": "admin",
+            "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+            "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+        }
+        token = jose_jwt.encode(expired_payload, PRIVATE_KEY, algorithm=ALGORITHM)
+        payload = _full_valid_payload()
+        response = client.post(
+            "/api/analyze",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 401
 
 
 class TestIncidentEndpoint:

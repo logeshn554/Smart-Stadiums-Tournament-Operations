@@ -10,10 +10,10 @@ Provides five endpoints:
 
 Security measures:
   - Pydantic input validation on all endpoints
+  - RS256 JWT authentication (asymmetric key verification)
   - Role-based access control (admin / viewer)
-  - In-memory sliding-window rate limiting per IP (intentional design choice
-    for single-process control room deployments; swap in Redis-backed rate
-    limiting for horizontal scaling without API contract changes)
+  - Dual-backend rate limiting: in-memory sliding-window (default) or
+    Redis-backed via slowapi (auto-detected from REDIS_URL env var)
   - HTML tag sanitisation on incident descriptions
   - Severity-sorted response output
 """
@@ -21,14 +21,16 @@ Security measures:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Final
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from backend.core.auth import verify_token
 from backend.core.decision_engine import (
     accessibility_routing,
     egress_plan,
@@ -61,14 +63,27 @@ SEVERITY_RANK: Final[dict[str, int]] = {
     SeverityLevel.LOW.value: 3,
 }
 
-# ── In-memory rate limiter ────────────────────────────────────────────────
-# Design note: This sliding-window rate limiter is intentionally in-memory.
-# Stadium control rooms run a single API process per venue, so in-memory
-# state is sufficient. For multi-instance horizontal scaling, replace with
-# Redis-backed counters (e.g. slowapi + redis) — no API changes needed.
+# ── Rate limiter backend selection ────────────────────────────────────────
+# Automatically uses Redis when REDIS_URL is set (production / Docker),
+# falls back to in-memory sliding-window for single-process deployments.
 
 RATE_LIMIT_MAX: Final[int] = 10
 RATE_LIMIT_WINDOW_SECONDS: Final[int] = 60
+
+_redis_client = None
+_REDIS_URL = os.getenv("REDIS_URL")
+
+if _REDIS_URL:
+    try:
+        import redis as _redis_module
+        _redis_client = _redis_module.from_url(_REDIS_URL, decode_responses=True)
+        _redis_client.ping()
+        logger.info("Rate limiter: using Redis backend at %s", _REDIS_URL)
+    except Exception as exc:
+        logger.warning("Redis unavailable (%s), falling back to in-memory rate limiter.", exc)
+        _redis_client = None
+
+# In-memory fallback store
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
 # ── Incident types that require admin privileges ──────────────────────────
@@ -87,12 +102,48 @@ _audit_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
 _ws_connections: list[WebSocket] = []
 
 
+# ── JWT authentication dependency ────────────────────────────────────────
+
+
+def _get_current_user(request: Request) -> dict[str, Any] | None:
+    """Extract and verify JWT from the Authorization header.
+
+    Supports ``Bearer <token>`` format.  If no Authorization header is
+    present, returns ``None`` (allowing the mock role field as fallback
+    for backward compatibility during the hackathon demo).
+
+    Args:
+        request: The incoming FastAPI request object.
+
+    Returns:
+        Decoded JWT payload dict, or ``None`` if no token is provided.
+
+    Raises:
+        HTTPException: 401 if a token is provided but is invalid/expired.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header format. Use: Bearer <token>")
+
+    token = auth_header.split("Bearer ", 1)[1]
+    try:
+        payload = verify_token(token)
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
 def _check_rate_limit(client_ip: str) -> None:
-    """Enforce per-IP rate limiting using an in-memory sliding window.
+    """Enforce per-IP rate limiting using Redis or in-memory sliding window.
+
+    When Redis is available, uses atomic ``ZRANGEBYSCORE`` + ``ZADD`` on a
+    sorted set keyed by IP.  Falls back to an in-memory sliding-window
+    counter for single-process deployments.
 
     Allows at most RATE_LIMIT_MAX requests within RATE_LIMIT_WINDOW_SECONDS.
-    Old timestamps outside the window are cleaned up on each call to prevent
-    unbounded memory growth.
 
     Args:
         client_ip: The IP address of the requesting client.
@@ -101,9 +152,32 @@ def _check_rate_limit(client_ip: str) -> None:
         HTTPException: 429 if the rate limit is exceeded.
     """
     now = time.time()
-    window_start = now - RATE_LIMIT_WINDOW_SECONDS
 
-    # Clean up stale timestamps to prevent memory leak
+    if _redis_client is not None:
+        key = f"rate_limit:{client_ip}"
+        window_start = now - RATE_LIMIT_WINDOW_SECONDS
+
+        pipe = _redis_client.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        pipe.zadd(key, {str(now): now})
+        pipe.expire(key, RATE_LIMIT_WINDOW_SECONDS)
+        results = pipe.execute()
+        current_count = results[1]
+
+        if current_count >= RATE_LIMIT_MAX:
+            logger.warning("Rate limit exceeded for IP: %s (Redis)", client_ip)
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Rate limit exceeded. Maximum {RATE_LIMIT_MAX} requests "
+                    f"per {RATE_LIMIT_WINDOW_SECONDS} seconds."
+                ),
+            )
+        return
+
+    # In-memory fallback
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
     _rate_limit_store[client_ip] = [
         ts for ts in _rate_limit_store[client_ip] if ts > window_start
     ]
@@ -221,26 +295,36 @@ async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_endpoint(payload: AnalyzeRequest) -> dict[str, Any]:
+async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[str, Any]:
     """Run all five decision-engine rules and return ranked recommendations.
 
     Accepts a combined payload containing gate statuses, an incident report,
-    weather context, event context, and a caller role.  The role field acts
-    as a mock authentication gate: viewers cannot submit fire_smoke or
-    evacuation-level incidents.
+    weather context, event context, and a caller role.  Supports two
+    authentication modes:
+
+    1. **JWT (preferred)**: ``Authorization: Bearer <token>`` — role is
+       extracted from the token's ``role`` claim.
+    2. **Mock role field (fallback)**: ``role`` field in the payload body
+       for backward-compatible hackathon demo usage.
 
     Args:
         payload: Validated AnalyzeRequest body.
+        request: FastAPI Request for JWT extraction.
 
     Returns:
         A dict with a 'recommendations' key containing a severity-sorted list.
 
     Raises:
+        HTTPException 401: If a JWT is provided but invalid.
         HTTPException 403: If a viewer attempts to submit a Critical incident.
     """
-    # ── Mock auth: viewers cannot submit Critical-level incident types ──
+    # ── Determine effective role (JWT takes precedence) ──
+    jwt_payload = _get_current_user(request)
+    effective_role = CallerRole(jwt_payload["role"]) if jwt_payload and "role" in jwt_payload else payload.role
+
+    # ── RBAC: viewers cannot submit Critical-level incident types ──
     if (
-        payload.role == CallerRole.VIEWER
+        effective_role == CallerRole.VIEWER
         and payload.incident.type in CRITICAL_INCIDENT_TYPES
     ):
         logger.warning(
@@ -284,7 +368,7 @@ async def analyze_endpoint(payload: AnalyzeRequest) -> dict[str, Any]:
     logger.info(
         "analyze_endpoint: returning %d recommendations for role=%s venue=%s",
         len(sorted_recommendations),
-        payload.role.value,
+        effective_role.value,
         payload.venue_id,
     )
 

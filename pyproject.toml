@@ -44,4 +44,21 @@ testpaths = ["backend/tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --cov=backend --cov-report=term-missing"
+
+[tool.bandit]
+exclude_dirs = ["backend/tests", "data"]
+skips = ["B101"]  # Allow assert in non-test code where it's used for invariants
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["backend/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]

@@ -6,6 +6,20 @@ __pycache__/
 # Environment
 .env
 
+# RSA keys (generated at runtime)
+keys/
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Load test results
+results/
+
+# Pytest cache
+.pytest_cache/
+
 # Node
 node_modules/
 

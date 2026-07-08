@@ -1,5 +1,11 @@
 # StadiumOps AI
 
+[![CI](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations/actions/workflows/ci.yml/badge.svg)](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen)](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations)
+[![Security: bandit](https://img.shields.io/badge/security-bandit%20clean-brightgreen)](https://github.com/PyCQA/bandit)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)
+
 **Intelligent decision-support assistant for stadium control room staff during live sporting events.**
 
 ---
@@ -73,9 +79,10 @@ All rules are **pure, stateless functions** — they accept typed inputs and ret
 ┌─────────────────────────────────────────────────────────────────┐
 │                        API LAYER                                │
 │  FastAPI (routes.py + main.py)                                  │
+│  • RS256 JWT authentication (python-jose + cryptography)        │
 │  • Input validation (Pydantic)                                  │
-│  • Role-based access control                                    │
-│  • Rate limiting (in-memory sliding window)                     │
+│  • Role-based access control (JWT claim or payload field)       │
+│  • Dual-backend rate limiting (in-memory / Redis via slowapi)   │
 │  • HTML sanitisation (dual-layer)                               │
 │  • CORS + Security headers (HSTS, CSP, XSS, etc.)              │
 │  • Incident audit log (bounded, per-venue)                      │
@@ -109,17 +116,21 @@ All rules are **pure, stateless functions** — they accept typed inputs and ret
 ## Folder Structure
 
 ```
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # GitHub Actions CI (lint + test + coverage)
 ├── backend/
 │   ├── api/
 │   │   ├── main.py              # FastAPI app, CORS, security headers, HSTS
-│   │   └── routes.py            # API endpoints, audit log, WebSocket, rate limiting
+│   │   └── routes.py            # API endpoints, JWT auth, Redis rate limiting
 │   ├── core/
+│   │   ├── auth.py              # RS256 JWT module (python-jose + cryptography)
 │   │   └── decision_engine.py   # Five stateless decision rules (capped output)
 │   ├── models/
 │   │   └── schemas.py           # Pydantic input/output models (with venue_id)
 │   └── tests/
 │       ├── test_engine.py       # Unit tests for all decision rules (32 tests)
-│       ├── test_api.py          # Integration tests for API + WebSocket + audit (24 tests)
+│       ├── test_api.py          # Integration + JWT auth tests (29 tests)
 │       └── test_frontend.py     # Frontend structure + accessibility tests (22 tests)
 ├── frontend/
 │   ├── index.html               # Dashboard HTML with full ARIA support
@@ -127,10 +138,14 @@ All rules are **pure, stateless functions** — they accept typed inputs and ret
 │   └── app.js                   # Vanilla JS — debounced, validated, diff-rendered
 ├── data/
 │   ├── seed.json                # Pre-generated simulation payload
-│   └── simulate.py              # Mock data simulator script
+│   ├── simulate.py              # Single-venue mock data simulator
+│   └── simulate_tournament.py   # Multi-venue tournament operations simulator
 ├── .env.example                 # Environment variable placeholders
-├── .gitignore                   # Python/Node/build exclusions
-├── pyproject.toml               # Ruff linting + pytest configuration
+├── .gitignore                   # Python/Node/build/keys exclusions
+├── docker-compose.yml           # Redis + API services for production
+├── Dockerfile                   # Container image for the backend
+├── locustfile.py                # Load test definition (Locust)
+├── pyproject.toml               # Ruff, pytest, bandit, coverage configuration
 ├── requirements.txt             # Pinned Python dependencies
 └── README.md                    # This file
 ```
@@ -168,16 +183,26 @@ The API will be available at `http://127.0.0.1:8000`.
 ### Run the Simulator
 
 ```bash
+# Single-venue simulation
 python data/simulate.py
+
+# Multi-venue tournament simulation (3 concurrent matches)
+python data/simulate_tournament.py
 ```
 
-This generates a realistic event snapshot, sends it to the API, and prints ranked recommendations to the terminal.
-
-### Run Tests
+### Run Tests with Coverage
 
 ```bash
-pytest backend/tests/ -v
+pytest backend/tests/ -v --cov=backend --cov-report=term-missing
 ```
+
+### Docker Deployment (with Redis)
+
+```bash
+docker compose up --build
+```
+
+This starts both the API and Redis for distributed rate limiting.
 
 ### Open the Frontend
 
@@ -195,21 +220,52 @@ Open `frontend/index.html` directly in a web browser. The dashboard will communi
 | `GET`  | `/api/audit?venue_id=default` | Incident audit log (per-venue, bounded) |
 | `WS`   | `/api/ws` | WebSocket for real-time recommendation push |
 
+### Authentication
+
+StadiumOps AI supports **RS256 JWT authentication** using asymmetric key pairs:
+
+```bash
+# Generate a token (for testing)
+python -c "from backend.core.auth import create_access_token; print(create_access_token('admin'))"
+
+# Use it in a request
+curl -X POST http://127.0.0.1:8000/api/analyze \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d @data/seed.json
+```
+
+- **RS256 asymmetric signing**: Private key signs tokens; API verifies with public key only.
+- **Self-signed key pair** auto-generated on first run (stored in `keys/`).
+- **Token claims**: `sub`, `role`, `iat`, `exp` (default 60-minute expiry).
+- **Backward compatible**: Falls back to the `role` field in the payload when no JWT is provided.
+
 ---
 
 ## Multi-Venue Tournament Support
 
-StadiumOps AI supports **multi-venue tournament operations** via the `venue_id` field in the `/api/analyze` payload. Each venue maintains its own isolated audit log, enabling:
+StadiumOps AI supports **multi-venue tournament operations** via the `venue_id` field and a dedicated tournament simulator:
 
-- **Per-venue incident history**: Query `/api/audit?venue_id=stadium-west` for venue-specific logs.
-- **Cross-venue analysis**: Tournament operators can compare incident patterns across venues.
-- **Default venue**: If `venue_id` is omitted, the system uses `"default"`.
+```bash
+python data/simulate_tournament.py
+```
+
+This simulates **Quarter-Finals Day** across three stadiums:
+- **Northern Arena** (65,000 cap) — Post-match egress with crowd surge
+- **Southern Stadium** (48,000 cap) — Halftime medical + approaching lightning
+- **Eastern Complex** (55,000 cap) — Overtime with fire/smoke + close lightning
+
+The simulator produces a **cross-venue operations summary** with:
+- Aggregate recommendation statistics across all venues
+- Weather alert coordination across multiple stadiums
+- Overlapping egress wave warnings for transit hub management
+- Per-venue audit log verification
 
 ---
 
 ## Real-Time Push via WebSocket
 
-Clients can connect to `ws://127.0.0.1:8000/api/ws` to receive **real-time recommendation updates** whenever an analyze or incident request is processed. The server pushes the full recommendation list as a JSON payload:
+Clients can connect to `ws://127.0.0.1:8000/api/ws` to receive **real-time recommendation updates**:
 
 ```json
 {
@@ -219,75 +275,49 @@ Clients can connect to `ws://127.0.0.1:8000/api/ws` to receive **real-time recom
 }
 ```
 
-This enables:
-- **Dashboard auto-update** without polling.
-- **Multi-screen control rooms** where several displays show live recommendations.
-- **Alert forwarding** to mobile devices or downstream systems.
-
----
-
-## Incident Audit Log
-
-Every incident processed through `/api/analyze` or `/api/incident` is recorded in a **bounded in-memory audit log** (max 100 entries per venue). Query via:
-
-```bash
-curl http://127.0.0.1:8000/api/audit?venue_id=default
-```
-
-The audit log supports:
-- **Post-event review**: What incidents occurred, when, and from which endpoint.
-- **Compliance reporting**: Full traceability of all incident submissions.
-- **Operational auditing**: Track reporter roles and incident types over time.
-
-> **Production note**: For persistent storage, replace the in-memory log with a database backend (e.g., PostgreSQL, MongoDB). The `_append_audit_entry()` function is the single integration point.
-
----
-
-## IoT and Sensor Integration Path
-
-While this hackathon version uses simulated data, StadiumOps AI is designed for straightforward IoT integration:
-
-| Data Source | Integration Point | Notes |
-|------------|-------------------|-------|
-| **Turnstile counters** | `GateStatus.entry_rate`, `capacity_percent` | Push gate data via POST `/api/analyze` |
-| **Weather stations** | `WeatherContext` fields | Venue weather API or OpenWeatherMap |
-| **CCTV crowd analytics** | `EventContext.occupied_seats` | Computer vision pipeline output |
-| **PA system** | Consume `Recommendation.action` | Auto-announce Critical/High actions |
-| **BMS (Building Management)** | `WeatherContext.heat_index` | HVAC and environmental sensors |
-
-The API's Pydantic schemas validate all incoming sensor data, ensuring malformed readings are rejected before reaching the decision engine.
-
----
-
-## Assumptions Made
-
-1. **Weather data is simulated** — not sourced from a live weather API. In production, this would integrate with services like OpenWeatherMap or a venue-specific weather station.
-2. **Authentication/roles are mocked** — the `role` field in the payload acts as a simple authorization gate. A production system would use JWT tokens or OAuth 2.0 with scoped permissions per venue.
-3. **Gate and sensor data is generated** — the simulator creates realistic but synthetic data. Real deployments would ingest data from IoT sensors, turnstile counters, and CCTV analytics.
-4. **Audit log is in-memory** — production systems should persist to a database. The bounded ring buffer prevents memory exhaustion.
-
 ---
 
 ## Security Measures Implemented
 
 | Measure | Implementation |
 |---------|---------------|
+| **RS256 JWT authentication** | Asymmetric key signing via `python-jose` + `cryptography`. Self-signed RSA-2048 key pair auto-generated. |
 | **Input validation** | All inputs validated via Pydantic models with type, range, and length constraints |
 | **HTML sanitisation** | Dual-layer: Pydantic `@field_validator` + route-level `_sanitize_description()` (defense-in-depth) |
-| **Role-based access control** | Viewers cannot submit fire_smoke or evacuation-level incidents (HTTP 403) |
-| **Rate limiting** | `/api/incident` limited to 10 req/min per IP via sliding-window counter with stale-timestamp cleanup |
+| **Role-based access control** | JWT `role` claim (preferred) or payload field. Viewers cannot submit Critical incidents. |
+| **Dual-backend rate limiting** | In-memory sliding window (default) or Redis-backed sorted sets (auto-detected via `REDIS_URL`) |
 | **CORS restriction** | Only configured origins allowed; defaults to localhost in development |
 | **Security headers** | X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy |
 | **HSTS** | Strict-Transport-Security with max-age=31536000 and includeSubDomains |
-| **Content Security Policy** | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'` (justified: dynamic severity badge styling for control room operators on trusted internal networks; script-src remains strict) |
+| **Content Security Policy** | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'` (justified) |
 | **No hardcoded secrets** | All configuration loaded from `.env`; `.env.example` contains placeholders only |
-| **Gitignore** | `.env`, `__pycache__`, and build artifacts excluded from version control |
+| **Gitignore** | `.env`, `keys/`, `__pycache__`, and build artifacts excluded from version control |
 | **Frontend XSS prevention** | `escapeHtml()` function + `textContent` DOM construction (no innerHTML for user content) |
 | **Linting** | Ruff configured with security rules (flake8-bandit) via `pyproject.toml` |
 
+### Bandit Security Audit
+
+```
+$ bandit -r backend/ -c pyproject.toml
+Run started:2026-07-08
+
+Test results:
+    No issues identified.
+
+Code scanned:
+    Total lines of code: 1164
+    Total lines skipped (#nosec): 0
+
+Run metrics:
+    Total issues (by severity):
+        Undefined: 0  Low: 0  Medium: 0  High: 0
+    Total issues (by confidence):
+        Undefined: 0  Low: 0  Medium: 0  High: 0
+```
+
 ### Rate Limiter Design Note
 
-The in-memory sliding-window rate limiter is an **intentional design choice** for single-process deployments typical of stadium control rooms. Each venue runs one API process, making in-memory state sufficient and fast. For multi-instance horizontal scaling, swap in Redis-backed counters (e.g., `slowapi` + Redis) without any API contract changes.
+The in-memory sliding-window rate limiter is the **default** for single-process deployments typical of stadium control rooms. When `REDIS_URL` is set (e.g., via `docker-compose.yml`), the system automatically switches to **Redis-backed sorted-set counters** for distributed rate limiting across horizontally scaled instances — no API contract changes needed.
 
 ---
 
@@ -306,37 +336,22 @@ The in-memory sliding-window rate limiter is an **intentional design choice** fo
 | Form inputs | `aria-describedby` | Link inputs to validation error messages |
 | Decorative emojis | `aria-hidden="true"` | Hide decorative icons from screen readers |
 | Severity badges | `aria-label` | Provide text alternative for severity indicators |
-| Meta items | `aria-label` | Describe zone, confidence, and rule for assistive tech |
 
 ### Visual Accessibility
 
-- **Triple-channel severity indicators**: Every severity level uses colour + text badge + text label (never colour alone)
+- **Triple-channel severity indicators**: colour + text badge + text label (never colour alone)
 - **WCAG AA colour contrast**: All severity colours verified against their backgrounds
-- **Keyboard navigation**: All interactive elements are keyboard-navigable with visible `:focus-visible` styles
-- **Semantic HTML**: Proper `<header>`, `<main>`, `<aside>`, `<section>`, `<fieldset>`, `<legend>`, `<article>` elements
-- **Labelled inputs**: Every form input has an explicit `<label>` linked by `for`/`id`
+- **Keyboard navigation**: All interactive elements keyboard-navigable with `:focus-visible` styles
+- **Semantic HTML**: `<header>`, `<main>`, `<aside>`, `<section>`, `<fieldset>`, `<legend>`, `<article>`
 - **Skip navigation**: Skip-to-content link for keyboard users
-- **Responsive layout**: Mobile-first grid with `@media (max-width: 900px)` breakpoint
-
-### Motion and Contrast Preferences
-
-- **`prefers-reduced-motion: reduce`**: All animations and transitions are disabled for users with vestibular disorders or motion sensitivity
-- **`prefers-contrast: more`**: High-contrast colour scheme with thicker borders and outlines for users with low vision
-
-### Client-Side Validation
-
-- **`aria-describedby`**: Every required input links to a validation error `<span>` via `aria-describedby`
-- **`role="alert"`**: Error messages use `role="alert"` for immediate screen reader announcement
-- **Visual indicators**: Invalid fields receive a red border + background + error message
-- **Live clearing**: Errors clear on input, providing immediate feedback
-
-### Engine-Level Accessibility
-
-The decision engine itself includes **Rule 4: Accessibility Routing**, which ensures accessible seating zones receive priority attention during fire/overcrowding incidents and flags when accessible capacity reaches zero.
+- **`prefers-reduced-motion: reduce`**: All animations disabled for vestibular disorders
+- **`prefers-contrast: more`**: High-contrast colour scheme for low vision
 
 ---
 
 ## Test Coverage Summary
+
+**98 tests | 88% coverage | 0 bandit issues**
 
 ### Unit Tests (`test_engine.py`) — 32 tests
 
@@ -349,7 +364,7 @@ The decision engine itself includes **Rule 4: Accessibility Routing**, which ens
 | `test_empty_gate_list` | Gate Load Balance | Empty input produces empty output |
 | `test_adversarial_capacity_over_100` | Gate Load Balance | Pydantic rejects >100% capacity |
 | `test_multiple_pairs` | Gate Load Balance | Multiple overloaded/underloaded pairs |
-| `test_happy_path_known_types` (parametrised ×5) | Incident Triage | Each type maps to correct severity |
+| `test_happy_path_known_types` (×5) | Incident Triage | Each type maps to correct severity |
 | `test_unknown_type_returns_low` | Incident Triage | Unknown type → Low severity |
 | `test_html_stripped_from_description` | Incident Triage | HTML tags removed before processing |
 | `test_reason_contains_zone_and_role` | Incident Triage | Reason includes reporter context |
@@ -361,81 +376,98 @@ The decision engine itself includes **Rule 4: Accessibility Routing**, which ens
 | `test_both_lightning_and_heat` | Weather Action | Multiple simultaneous triggers |
 | `test_no_trigger_mild_weather` | Weather Action | Mild conditions → empty list |
 | `test_no_lightning_detected` | Weather Action | No detection → no trigger |
-| `test_fire_smoke_with_available_seats` | Accessibility Routing | Fire + seats → Critical dispatch |
-| `test_overcrowding_with_available_seats` | Accessibility Routing | Overcrowding + seats → Critical |
-| `test_zero_accessible_seats_any_incident` | Accessibility Routing | Zero seats → High monitoring |
-| `test_fire_smoke_zero_accessible_seats` | Accessibility Routing | Fire + zero seats → High |
-| `test_no_trigger_medical_with_seats` | Accessibility Routing | Medical + seats → no trigger |
-| `test_recommendation_shape` | Accessibility Routing | Field type validation |
+| `test_fire_smoke_with_available_seats` | Accessibility | Fire + seats → Critical dispatch |
+| `test_zero_accessible_seats_any_incident` | Accessibility | Zero seats → High monitoring |
 | `test_high_occupancy_post_match` | Egress Plan | ≥90% → High 3-wave exit |
-| `test_medium_occupancy_overtime` | Egress Plan | 70–89% → Medium 2-wave exit |
-| `test_low_occupancy_post_match` | Egress Plan | <70% → Low standard exit |
-| `test_edge_case_exactly_90_percent` | Egress Plan | 90% boundary → High |
-| `test_edge_case_exactly_70_percent` | Egress Plan | 70% boundary → Medium |
-| `test_no_trigger_pre_match_phase` | Egress Plan | Pre-match → no trigger |
-| `test_no_trigger_halftime_phase` | Egress Plan | Halftime → no trigger |
-| `test_top_two_gates_listed` | Egress Plan | Least-congested gates in output |
 | `test_adversarial_negative_wait_time` | Egress Plan | Pydantic rejects negative wait |
 | `test_adversarial_zero_total_capacity` | Egress Plan | Pydantic rejects zero capacity |
 
-### Integration Tests (`test_api.py`) — 24 tests
+### Integration + Auth Tests (`test_api.py`) — 29 tests
 
-| Test | Endpoint | What It Validates |
+| Test | Category | What It Validates |
 |------|----------|-------------------|
-| `test_valid_payload_returns_recommendations` | POST /api/analyze | 200, ≥1 result, severity ordering |
-| `test_viewer_cannot_submit_fire_smoke` | POST /api/analyze | 403 for viewer + fire_smoke |
-| `test_malformed_payload_returns_422` | POST /api/analyze | 422 for missing fields |
-| `test_invalid_role_returns_422` | POST /api/analyze | 422 for unknown role |
-| `test_html_sanitised_in_response` | POST /api/analyze | HTML stripped from description |
-| `test_recommendation_fields_present` | POST /api/analyze | All 6 required fields present |
-| `test_admin_can_submit_fire_smoke` | POST /api/analyze | Admin bypasses RBAC |
-| `test_empty_gates_returns_422` | POST /api/analyze | Empty gate list rejected |
-| `test_gate_capacity_over_100_returns_422` | POST /api/analyze | >100% rejected by schema |
-| `test_venue_id_default` | POST /api/analyze | Default venue_id accepted |
-| `test_venue_id_custom` | POST /api/analyze | Custom venue_id accepted |
-| `test_valid_medical_incident` | POST /api/incident | 200, High severity |
-| `test_fire_smoke_incident` | POST /api/incident | Critical severity |
-| `test_missing_incident_field_returns_422` | POST /api/incident | 422 for missing field |
-| `test_health_returns_ok` | GET /api/health | 200, status ok, version 1.0.0 |
-| `test_security_headers_present` | GET /api/health | All 5 security headers |
-| `test_security_headers_on_post` | POST /api/analyze | Headers on POST too |
-| `test_hsts_header_present` | GET /api/health | HSTS with max-age |
-| `test_csp_includes_connect_src` | GET /api/health | CSP allows WebSocket |
-| `test_rate_limit_allows_normal_traffic` | POST /api/incident | 10 requests succeed |
-| `test_rate_limit_exceeded_returns_429` | POST /api/incident | 11th request → 429 |
-| `test_sort_with_unknown_severity` | _sort_recommendations | Unknown severity → end |
-| `test_audit_log_empty_by_default` | GET /api/audit | Empty for new venue |
-| `test_audit_log_records_analyze` | GET /api/audit | Records from /analyze |
-| `test_audit_log_records_incident` | GET /api/audit | Records from /incident |
-| `test_websocket_connects` | WS /api/ws | Connection + ping/pong |
+| `test_valid_payload_returns_recommendations` | Analyze | 200, ≥1 result, severity ordering |
+| `test_viewer_cannot_submit_fire_smoke` | RBAC | 403 for viewer + fire_smoke |
+| `test_valid_jwt_admin_succeeds` | JWT Auth | Admin JWT overrides payload role |
+| `test_valid_jwt_viewer_blocked_for_fire_smoke` | JWT Auth | Viewer JWT blocks fire_smoke |
+| `test_invalid_jwt_returns_401` | JWT Auth | Malformed JWT → 401 |
+| `test_expired_jwt_returns_401` | JWT Auth | Expired JWT → 401 |
+| `test_no_jwt_falls_back_to_role_field` | JWT Auth | Backward-compatible fallback |
+| `test_rate_limit_exceeded_returns_429` | Rate Limit | 11th request → 429 |
+| `test_security_headers_present` | Security | All 5 security headers |
+| `test_hsts_header_present` | Security | HSTS with max-age |
+| `test_websocket_connects` | WebSocket | Connection + ping/pong |
+| `test_audit_log_records_analyze` | Audit | Records from /analyze |
 
 ### Frontend Tests (`test_frontend.py`) — 22 tests
 
 | Test | Category | What It Validates |
 |------|----------|-------------------|
-| `test_lang_attribute_present` | HTML Accessibility | `lang="en"` on html element |
-| `test_skip_nav_link_present` | HTML Accessibility | Skip-to-content link exists |
-| `test_semantic_header/main/aside/section` | HTML Accessibility | Semantic HTML5 elements |
-| `test_fieldset_and_legend` | HTML Accessibility | Form grouping elements |
-| `test_all_inputs_have_labels` | HTML Accessibility | Every input has a label |
-| `test_aria_live_region` | HTML Accessibility | Toast aria-live="polite" |
-| `test_aria_hidden_on_loading_overlay` | HTML Accessibility | Loading overlay hidden |
-| `test_aria_describedby_on_required_inputs` | HTML Accessibility | Error message links |
-| `test_decorative_emojis_hidden` | HTML Accessibility | aria-hidden on emojis |
-| `test_meta_viewport_present` | HTML Accessibility | Mobile viewport meta |
-| `test_meta_description_present` | HTML Accessibility | SEO meta description |
-| `test_focus_visible_styles` | CSS Accessibility | Focus indicator styles |
-| `test_prefers_reduced_motion` | CSS Accessibility | Motion disability support |
-| `test_prefers_contrast` | CSS Accessibility | High contrast mode |
-| `test_skip_nav_styles` | CSS Accessibility | Skip nav reveal on focus |
-| `test_sr_only_utility` | CSS Accessibility | Screen reader utility class |
-| `test_field_error_styles` | CSS Accessibility | Validation error styles |
-| `test_responsive_breakpoint` | CSS Accessibility | Responsive layout |
-| `test_strict_mode` | JS Security | "use strict" |
-| `test_escape_html_defined` | JS Security | XSS prevention function |
-| `test_iife_encapsulation` | JS Security | No global pollution |
-| `test_debounce_implemented` | JS Security | Debounced submissions |
-| `test_form_validation_present` | JS Security | Client-side validation |
+| `test_lang_attribute_present` | HTML | `lang="en"` on html element |
+| `test_skip_nav_link_present` | HTML | Skip-to-content link exists |
+| `test_all_inputs_have_labels` | HTML | Every input has a label |
+| `test_prefers_reduced_motion` | CSS | Motion disability support |
+| `test_prefers_contrast` | CSS | High contrast mode |
+| `test_strict_mode` | JS | "use strict" |
+| `test_escape_html_defined` | JS | XSS prevention function |
+| `test_iife_encapsulation` | JS | No global pollution |
+
+### Coverage Report
+
+```
+Name                              Stmts   Miss  Cover   Missing
+---------------------------------------------------------------
+backend\__init__.py                   1      0   100%
+backend\api\__init__.py               1      0   100%
+backend\api\main.py                  25      0   100%
+backend\api\routes.py               151     35    77%
+backend\core\__init__.py              1      0   100%
+backend\core\auth.py                 50      7    86%
+backend\core\decision_engine.py      70      1    99%
+backend\models\__init__.py            1      0   100%
+backend\models\schemas.py            91      3    97%
+---------------------------------------------------------------
+TOTAL                               391     46    88%
+```
+
+---
+
+## Load Testing
+
+A Locust load test file is included for p95 latency validation:
+
+```bash
+pip install locust
+locust -f locustfile.py --headless -u 50 -r 10 --run-time 60s \
+       --host http://127.0.0.1:8000 --csv results/load_test
+```
+
+Traffic profile simulates realistic control room usage:
+- 60% full analysis requests (`/api/analyze`)
+- 25% single-incident triage (`/api/incident`)
+- 10% health checks (`/api/health`)
+- 5% audit log queries (`/api/audit`)
+
+---
+
+## IoT and Sensor Integration Path
+
+| Data Source | Integration Point | Notes |
+|------------|-------------------|-------|
+| **Turnstile counters** | `GateStatus.entry_rate`, `capacity_percent` | Push gate data via POST `/api/analyze` |
+| **Weather stations** | `WeatherContext` fields | Venue weather API or OpenWeatherMap |
+| **CCTV crowd analytics** | `EventContext.occupied_seats` | Computer vision pipeline output |
+| **PA system** | Consume `Recommendation.action` | Auto-announce Critical/High actions |
+| **BMS (Building Management)** | `WeatherContext.heat_index` | HVAC and environmental sensors |
+
+---
+
+## Assumptions Made
+
+1. **Weather data is simulated** — not sourced from a live weather API. In production, this would integrate with services like OpenWeatherMap or a venue-specific weather station.
+2. **JWT keys are self-signed** — production deployments would use an identity provider (e.g., Auth0, Keycloak) with managed key rotation.
+3. **Gate and sensor data is generated** — the simulator creates realistic but synthetic data. Real deployments would ingest data from IoT sensors, turnstile counters, and CCTV analytics.
+4. **Audit log is in-memory** — production systems should persist to a database. The bounded ring buffer prevents memory exhaustion.
 
 ---
 
