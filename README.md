@@ -412,26 +412,6 @@ The in-memory sliding-window rate limiter is the **default** for single-process 
 | `test_escape_html_defined` | JS | XSS prevention function |
 | `test_iife_encapsulation` | JS | No global pollution |
 
-### Coverage Report
-
-```
-Name                              Stmts   Miss  Cover   Missing
----------------------------------------------------------------
-backend\__init__.py                   1      0   100%
-backend\api\__init__.py               1      0   100%
-backend\api\main.py                  25      0   100%
-backend\api\routes.py               151     35    77%
-backend\core\__init__.py              1      0   100%
-backend\core\auth.py                 50      7    86%
-backend\core\decision_engine.py      70      1    99%
-backend\models\__init__.py            1      0   100%
-backend\models\schemas.py            91      3    97%
----------------------------------------------------------------
-TOTAL                               391     46    88%
-```
-
----
-
 ## Load Testing
 
 A Locust load test file is included for p95 latency validation:
