@@ -2,8 +2,7 @@
    StadiumOps AI — Control Room Dashboard Styles
    ══════════════════════════════════════════════════════════════════════ */
 
-/* ── Imports & Reset ──────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* ── Reset ────────────────────────────────────────────────────────────── */
 
 *, *::before, *::after {
     box-sizing: border-box;
@@ -38,6 +37,10 @@
     --color-low: #2E7D32;
     --color-low-bg: rgba(46, 125, 50, 0.12);
     --color-low-border: rgba(46, 125, 50, 0.35);
+
+    /* Error colors */
+    --color-error: #EF5350;
+    --color-error-bg: rgba(239, 83, 80, 0.1);
 
     /* ── Typography ───────────────────────────────────────────────────── */
     --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -81,6 +84,20 @@ body {
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Screen reader only utility ───────────────────────────────────────── */
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* ── Focus styles (accessibility) ─────────────────────────────────────── */
@@ -311,6 +328,30 @@ body {
     background-position: right 12px center;
     padding-right: 32px;
     cursor: pointer;
+}
+
+/* ── Field validation error styles ────────────────────────────────────── */
+
+.form-group input.invalid,
+.form-group textarea.invalid {
+    border-color: var(--color-error);
+    background: var(--color-error-bg);
+}
+
+.field-error {
+    display: block;
+    font-size: var(--font-size-xs);
+    color: var(--color-error);
+    min-height: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease, margin-top 0.2s ease;
+    margin-top: 0;
+}
+
+.field-error.visible {
+    max-height: 30px;
+    margin-top: var(--space-xs);
 }
 
 .form-row {
@@ -664,5 +705,86 @@ body {
         flex-direction: column;
         gap: var(--space-sm);
         text-align: center;
+    }
+}
+
+/* ── Reduced Motion (Accessibility) ───────────────────────────────────── */
+/* Respects users who prefer reduced motion due to vestibular disorders,
+   motion sickness, or cognitive disabilities (WCAG 2.1 Level AAA). */
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .phase-badge .pulse-dot {
+        animation: none;
+    }
+
+    .auto-refresh-indicator .spinner {
+        animation: none;
+    }
+
+    .loading-spinner {
+        animation: none;
+        border-color: var(--color-accent);
+    }
+
+    .recommendation-card {
+        animation: none;
+    }
+
+    .toast {
+        animation: none;
+    }
+}
+
+/* ── High Contrast Mode (Accessibility) ───────────────────────────────── */
+/* Enhanced contrast for users with low vision (WCAG 2.1 Level AAA). */
+
+@media (prefers-contrast: more) {
+    :root {
+        --color-bg-primary: #000000;
+        --color-bg-secondary: #0A0A0A;
+        --color-bg-card: #111111;
+        --color-bg-input: #0A0A0A;
+        --color-border: #555555;
+        --color-border-focus: #88BBFF;
+        --color-text-primary: #FFFFFF;
+        --color-text-secondary: #CCCCCC;
+        --color-text-muted: #999999;
+        --color-accent: #88BBFF;
+        --color-accent-hover: #AADDFF;
+
+        --color-critical: #FF4444;
+        --color-critical-bg: rgba(255, 68, 68, 0.2);
+        --color-high: #FF8800;
+        --color-high-bg: rgba(255, 136, 0, 0.2);
+        --color-medium: #FFCC00;
+        --color-medium-bg: rgba(255, 204, 0, 0.15);
+        --color-low: #44BB44;
+        --color-low-bg: rgba(68, 187, 68, 0.2);
+    }
+
+    .severity-badge.medium {
+        color: #000000;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        border-width: 2px;
+    }
+
+    *:focus-visible {
+        outline-width: 3px;
+        outline-offset: 3px;
+    }
+
+    .recommendation-card {
+        border-left-width: 6px;
     }
 }

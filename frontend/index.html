@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="StadiumOps AI — Intelligent decision-support dashboard for stadium control room staff during live sporting events.">
     <title>StadiumOps AI — Control Room Dashboard</title>
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" as="style">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,11 +22,11 @@
         </div>
         <div class="header-right">
             <div class="phase-badge" id="phase-badge">
-                <span class="pulse-dot"></span>
+                <span class="pulse-dot" aria-hidden="true"></span>
                 <span id="phase-badge-text">HALFTIME</span>
             </div>
             <div class="auto-refresh-indicator" id="auto-refresh-indicator">
-                <span class="spinner"></span>
+                <span class="spinner" aria-hidden="true"></span>
                 <span>Auto-refresh: 30s</span>
             </div>
         </div>
@@ -40,7 +42,7 @@
                 <!-- Gate Statuses -->
                 <fieldset class="form-section">
                     <legend class="form-section-title">
-                        <span class="section-icon">🚪</span> Gate Statuses
+                        <span class="section-icon" aria-hidden="true">🚪</span> Gate Statuses
                     </legend>
 
                     <div class="gate-entry" id="gate-1-entry">
@@ -48,21 +50,25 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-1-id">Gate ID</label>
-                                <input type="text" id="gate-1-id" name="gate_1_id" value="North-A" required>
+                                <input type="text" id="gate-1-id" name="gate_1_id" value="North-A" required aria-describedby="gate-1-id-error">
+                                <span class="field-error" id="gate-1-id-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-1-capacity">Capacity %</label>
-                                <input type="number" id="gate-1-capacity" name="gate_1_capacity" value="88" min="0" max="100" step="0.1" required>
+                                <input type="number" id="gate-1-capacity" name="gate_1_capacity" value="88" min="0" max="100" step="0.1" required aria-describedby="gate-1-capacity-error">
+                                <span class="field-error" id="gate-1-capacity-error" role="alert"></span>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-1-rate">Entry Rate (ppm)</label>
-                                <input type="number" id="gate-1-rate" name="gate_1_rate" value="45" min="0" required>
+                                <input type="number" id="gate-1-rate" name="gate_1_rate" value="45" min="0" required aria-describedby="gate-1-rate-error">
+                                <span class="field-error" id="gate-1-rate-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-1-wait">Wait Time (s)</label>
-                                <input type="number" id="gate-1-wait" name="gate_1_wait" value="340" min="0" required>
+                                <input type="number" id="gate-1-wait" name="gate_1_wait" value="340" min="0" required aria-describedby="gate-1-wait-error">
+                                <span class="field-error" id="gate-1-wait-error" role="alert"></span>
                             </div>
                         </div>
                     </div>
@@ -72,21 +78,25 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-2-id">Gate ID</label>
-                                <input type="text" id="gate-2-id" name="gate_2_id" value="North-B" required>
+                                <input type="text" id="gate-2-id" name="gate_2_id" value="North-B" required aria-describedby="gate-2-id-error">
+                                <span class="field-error" id="gate-2-id-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-2-capacity">Capacity %</label>
-                                <input type="number" id="gate-2-capacity" name="gate_2_capacity" value="92" min="0" max="100" step="0.1" required>
+                                <input type="number" id="gate-2-capacity" name="gate_2_capacity" value="92" min="0" max="100" step="0.1" required aria-describedby="gate-2-capacity-error">
+                                <span class="field-error" id="gate-2-capacity-error" role="alert"></span>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-2-rate">Entry Rate (ppm)</label>
-                                <input type="number" id="gate-2-rate" name="gate_2_rate" value="50" min="0" required>
+                                <input type="number" id="gate-2-rate" name="gate_2_rate" value="50" min="0" required aria-describedby="gate-2-rate-error">
+                                <span class="field-error" id="gate-2-rate-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-2-wait">Wait Time (s)</label>
-                                <input type="number" id="gate-2-wait" name="gate_2_wait" value="420" min="0" required>
+                                <input type="number" id="gate-2-wait" name="gate_2_wait" value="420" min="0" required aria-describedby="gate-2-wait-error">
+                                <span class="field-error" id="gate-2-wait-error" role="alert"></span>
                             </div>
                         </div>
                     </div>
@@ -96,21 +106,25 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-3-id">Gate ID</label>
-                                <input type="text" id="gate-3-id" name="gate_3_id" value="South-A" required>
+                                <input type="text" id="gate-3-id" name="gate_3_id" value="South-A" required aria-describedby="gate-3-id-error">
+                                <span class="field-error" id="gate-3-id-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-3-capacity">Capacity %</label>
-                                <input type="number" id="gate-3-capacity" name="gate_3_capacity" value="25" min="0" max="100" step="0.1" required>
+                                <input type="number" id="gate-3-capacity" name="gate_3_capacity" value="25" min="0" max="100" step="0.1" required aria-describedby="gate-3-capacity-error">
+                                <span class="field-error" id="gate-3-capacity-error" role="alert"></span>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-3-rate">Entry Rate (ppm)</label>
-                                <input type="number" id="gate-3-rate" name="gate_3_rate" value="8" min="0" required>
+                                <input type="number" id="gate-3-rate" name="gate_3_rate" value="8" min="0" required aria-describedby="gate-3-rate-error">
+                                <span class="field-error" id="gate-3-rate-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-3-wait">Wait Time (s)</label>
-                                <input type="number" id="gate-3-wait" name="gate_3_wait" value="45" min="0" required>
+                                <input type="number" id="gate-3-wait" name="gate_3_wait" value="45" min="0" required aria-describedby="gate-3-wait-error">
+                                <span class="field-error" id="gate-3-wait-error" role="alert"></span>
                             </div>
                         </div>
                     </div>
@@ -120,21 +134,25 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-4-id">Gate ID</label>
-                                <input type="text" id="gate-4-id" name="gate_4_id" value="South-B" required>
+                                <input type="text" id="gate-4-id" name="gate_4_id" value="South-B" required aria-describedby="gate-4-id-error">
+                                <span class="field-error" id="gate-4-id-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-4-capacity">Capacity %</label>
-                                <input type="number" id="gate-4-capacity" name="gate_4_capacity" value="60" min="0" max="100" step="0.1" required>
+                                <input type="number" id="gate-4-capacity" name="gate_4_capacity" value="60" min="0" max="100" step="0.1" required aria-describedby="gate-4-capacity-error">
+                                <span class="field-error" id="gate-4-capacity-error" role="alert"></span>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="gate-4-rate">Entry Rate (ppm)</label>
-                                <input type="number" id="gate-4-rate" name="gate_4_rate" value="22" min="0" required>
+                                <input type="number" id="gate-4-rate" name="gate_4_rate" value="22" min="0" required aria-describedby="gate-4-rate-error">
+                                <span class="field-error" id="gate-4-rate-error" role="alert"></span>
                             </div>
                             <div class="form-group">
                                 <label for="gate-4-wait">Wait Time (s)</label>
-                                <input type="number" id="gate-4-wait" name="gate_4_wait" value="130" min="0" required>
+                                <input type="number" id="gate-4-wait" name="gate_4_wait" value="130" min="0" required aria-describedby="gate-4-wait-error">
+                                <span class="field-error" id="gate-4-wait-error" role="alert"></span>
                             </div>
                         </div>
                     </div>
@@ -143,16 +161,18 @@
                 <!-- Incident Report -->
                 <fieldset class="form-section">
                     <legend class="form-section-title">
-                        <span class="section-icon">🚨</span> Incident Report
+                        <span class="section-icon" aria-hidden="true">🚨</span> Incident Report
                     </legend>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="incident-id">Incident ID</label>
-                            <input type="text" id="incident-id" name="incident_id" value="INC-001" required>
+                            <input type="text" id="incident-id" name="incident_id" value="INC-001" required aria-describedby="incident-id-error">
+                            <span class="field-error" id="incident-id-error" role="alert"></span>
                         </div>
                         <div class="form-group">
                             <label for="incident-zone">Zone</label>
-                            <input type="text" id="incident-zone" name="incident_zone" value="B3" required>
+                            <input type="text" id="incident-zone" name="incident_zone" value="B3" required aria-describedby="incident-zone-error">
+                            <span class="field-error" id="incident-zone-error" role="alert"></span>
                         </div>
                     </div>
                     <div class="form-group">
@@ -167,18 +187,20 @@
                     </div>
                     <div class="form-group">
                         <label for="incident-description">Description</label>
-                        <textarea id="incident-description" name="incident_description" maxlength="300" placeholder="Describe the incident..." required>Spectator collapsed near Row 14, appears heat exhaustion.</textarea>
+                        <textarea id="incident-description" name="incident_description" maxlength="300" placeholder="Describe the incident..." required aria-describedby="incident-description-error">Spectator collapsed near Row 14, appears heat exhaustion.</textarea>
+                        <span class="field-error" id="incident-description-error" role="alert"></span>
                     </div>
                     <div class="form-group">
                         <label for="incident-reporter">Reporter Role</label>
-                        <input type="text" id="incident-reporter" name="incident_reporter" value="section_steward" required>
+                        <input type="text" id="incident-reporter" name="incident_reporter" value="section_steward" required aria-describedby="incident-reporter-error">
+                        <span class="field-error" id="incident-reporter-error" role="alert"></span>
                     </div>
                 </fieldset>
 
                 <!-- Weather Context -->
                 <fieldset class="form-section">
                     <legend class="form-section-title">
-                        <span class="section-icon">🌡️</span> Weather Context
+                        <span class="section-icon" aria-hidden="true">🌡️</span> Weather Context
                     </legend>
                     <div class="form-row">
                         <div class="form-group">
@@ -208,7 +230,7 @@
                 <!-- Event Context -->
                 <fieldset class="form-section">
                     <legend class="form-section-title">
-                        <span class="section-icon">🏟️</span> Event Context
+                        <span class="section-icon" aria-hidden="true">🏟️</span> Event Context
                     </legend>
                     <div class="form-group">
                         <label for="event-phase">Event Phase</label>
@@ -222,7 +244,8 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="event-total-capacity">Total Capacity</label>
-                            <input type="number" id="event-total-capacity" name="event_total_capacity" value="60000" min="1" required>
+                            <input type="number" id="event-total-capacity" name="event_total_capacity" value="60000" min="1" required aria-describedby="event-total-capacity-error">
+                            <span class="field-error" id="event-total-capacity-error" role="alert"></span>
                         </div>
                         <div class="form-group">
                             <label for="event-occupied">Occupied Seats</label>
@@ -244,7 +267,7 @@
                 <!-- Role Selection -->
                 <fieldset class="form-section">
                     <legend class="form-section-title">
-                        <span class="section-icon">👤</span> Caller Role
+                        <span class="section-icon" aria-hidden="true">👤</span> Caller Role
                     </legend>
                     <div class="form-group">
                         <label for="caller-role">Role</label>
@@ -269,7 +292,7 @@
             </div>
             <div id="recommendations-list">
                 <div class="empty-state" id="empty-state">
-                    <div class="empty-state-icon">📋</div>
+                    <div class="empty-state-icon" aria-hidden="true">📋</div>
                     <p class="empty-state-text">
                         Submit event data to generate intelligent, ranked action recommendations for the control room.
                     </p>
@@ -280,7 +303,9 @@
 
     <!-- ═══ Loading Overlay ══════════════════════════════════════════════ -->
     <div class="loading-overlay" id="loading-overlay" aria-hidden="true">
-        <div class="loading-spinner"></div>
+        <div class="loading-spinner" role="status" aria-label="Loading recommendations">
+            <span class="sr-only">Loading...</span>
+        </div>
     </div>
 
     <!-- ═══ Toast Container ═════════════════════════════════════════════ -->

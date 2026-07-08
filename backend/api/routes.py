@@ -1,26 +1,33 @@
 """
 FastAPI route definitions for StadiumOps AI.
 
-Provides three endpoints:
+Provides five endpoints:
   POST /api/analyze   — full analysis with all five decision-engine rules
   POST /api/incident  — single-incident triage (rate-limited)
   GET  /api/health    — service health check
+  GET  /api/audit     — incident audit log (in-memory, per-venue)
+  WS   /api/ws        — WebSocket for real-time recommendation push
 
 Security measures:
   - Pydantic input validation on all endpoints
   - Role-based access control (admin / viewer)
-  - In-memory sliding-window rate limiting per IP
+  - In-memory sliding-window rate limiting per IP (intentional design choice
+    for single-process control room deployments; swap in Redis-backed rate
+    limiting for horizontal scaling without API contract changes)
   - HTML tag sanitisation on incident descriptions
   - Severity-sorted response output
 """
 
+import asyncio
+import json
 import logging
 import re
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Final
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from backend.core.decision_engine import (
     accessibility_routing,
@@ -55,6 +62,10 @@ SEVERITY_RANK: Final[dict[str, int]] = {
 }
 
 # ── In-memory rate limiter ────────────────────────────────────────────────
+# Design note: This sliding-window rate limiter is intentionally in-memory.
+# Stadium control rooms run a single API process per venue, so in-memory
+# state is sufficient. For multi-instance horizontal scaling, replace with
+# Redis-backed counters (e.g. slowapi + redis) — no API changes needed.
 
 RATE_LIMIT_MAX: Final[int] = 10
 RATE_LIMIT_WINDOW_SECONDS: Final[int] = 60
@@ -63,6 +74,17 @@ _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 # ── Incident types that require admin privileges ──────────────────────────
 
 CRITICAL_INCIDENT_TYPES: Final[frozenset[str]] = frozenset({"fire_smoke"})
+
+# ── In-memory incident audit log ─────────────────────────────────────────
+# Stores the last MAX_AUDIT_ENTRIES incidents per venue for traceability.
+# Production deployments should persist to a database.
+
+MAX_AUDIT_ENTRIES: Final[int] = 100
+_audit_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+# ── WebSocket connection manager ─────────────────────────────────────────
+
+_ws_connections: list[WebSocket] = []
 
 
 def _check_rate_limit(client_ip: str) -> None:
@@ -137,7 +159,65 @@ def _sort_recommendations(
     )
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────
+def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) -> None:
+    """Append an incident to the in-memory audit log.
+
+    Maintains a bounded ring buffer per venue, discarding the oldest
+    entries when MAX_AUDIT_ENTRIES is reached.
+
+    Args:
+        venue_id: Venue identifier for multi-venue isolation.
+        incident: The incident report to log.
+        source: Which endpoint recorded the entry ('analyze' or 'incident').
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+        "incident_id": incident.incident_id,
+        "zone": incident.zone,
+        "type": incident.type,
+        "description": incident.description,
+        "reporter_role": incident.reporter_role,
+    }
+    log = _audit_log[venue_id]
+    log.append(entry)
+    # Maintain bounded size
+    if len(log) > MAX_AUDIT_ENTRIES:
+        _audit_log[venue_id] = log[-MAX_AUDIT_ENTRIES:]
+
+    logger.info("Audit log: recorded %s from %s for venue %s", incident.incident_id, source, venue_id)
+
+
+async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
+    """Broadcast recommendations to all connected WebSocket clients.
+
+    Sends a JSON payload to every active WebSocket connection. Silently
+    removes disconnected clients from the connection pool.
+
+    Args:
+        recommendations: The list of recommendations to broadcast.
+    """
+    if not _ws_connections:
+        return
+
+    payload = json.dumps({
+        "type": "recommendations_update",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "recommendations": [r.model_dump() for r in recommendations],
+    })
+
+    disconnected: list[WebSocket] = []
+    for ws in _ws_connections:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            disconnected.append(ws)
+
+    for ws in disconnected:
+        _ws_connections.remove(ws)
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
@@ -195,10 +275,17 @@ async def analyze_endpoint(payload: AnalyzeRequest) -> dict[str, Any]:
 
     sorted_recommendations = _sort_recommendations(all_recommendations)
 
+    # ── Record to audit log ──
+    _append_audit_entry(payload.venue_id, payload.incident, "analyze")
+
+    # ── Broadcast via WebSocket ──
+    await _broadcast_ws(sorted_recommendations)
+
     logger.info(
-        "analyze_endpoint: returning %d recommendations for role=%s",
+        "analyze_endpoint: returning %d recommendations for role=%s venue=%s",
         len(sorted_recommendations),
         payload.role.value,
+        payload.venue_id,
     )
 
     return {"recommendations": sorted_recommendations}
@@ -244,6 +331,12 @@ async def incident_endpoint(
 
     sorted_recommendations = _sort_recommendations(recommendations)
 
+    # ── Record to audit log (default venue) ──
+    _append_audit_entry("default", report, "incident")
+
+    # ── Broadcast via WebSocket ──
+    await _broadcast_ws(sorted_recommendations)
+
     logger.info(
         "incident_endpoint: type=%s returning %d recommendation(s).",
         report.type,
@@ -261,3 +354,56 @@ async def health_endpoint() -> dict[str, str]:
         A dict with 'status' and 'version' keys.
     """
     return {"status": "ok", "version": "1.0.0"}
+
+
+@router.get("/audit")
+async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
+    """Return the incident audit log for a given venue.
+
+    Provides a chronological record of all incidents processed through
+    both the /api/analyze and /api/incident endpoints. Useful for
+    post-event review, compliance reporting, and operational auditing.
+
+    Args:
+        venue_id: Venue identifier (defaults to 'default').
+
+    Returns:
+        A dict with 'venue_id', 'total_entries', and 'entries' keys.
+    """
+    entries = _audit_log.get(venue_id, [])
+    logger.info("audit_endpoint: returning %d entries for venue %s", len(entries), venue_id)
+    return {
+        "venue_id": venue_id,
+        "total_entries": len(entries),
+        "entries": entries,
+    }
+
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time recommendation push.
+
+    Clients connect to receive live recommendation updates whenever
+    an analyze or incident request is processed. The server pushes
+    JSON payloads containing the full recommendation list.
+
+    Connection is maintained until the client disconnects or an error occurs.
+    """
+    await websocket.accept()
+    _ws_connections.append(websocket)
+    logger.info("WebSocket client connected. Total: %d", len(_ws_connections))
+
+    try:
+        while True:
+            # Keep the connection alive; wait for client messages (e.g. pings)
+            data = await websocket.receive_text()
+            # Echo back a heartbeat acknowledgement
+            await websocket.send_text(json.dumps({"type": "pong", "received": data}))
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected.")
+    except Exception as exc:
+        logger.warning("WebSocket error: %s", exc)
+    finally:
+        if websocket in _ws_connections:
+            _ws_connections.remove(websocket)
+        logger.info("WebSocket clients remaining: %d", len(_ws_connections))

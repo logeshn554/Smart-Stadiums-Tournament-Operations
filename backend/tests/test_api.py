@@ -3,14 +3,16 @@ Integration tests for the StadiumOps AI API layer.
 
 Uses FastAPI TestClient to validate endpoint behaviour including
 authentication, validation, response structure, security headers,
-rate limiting, HTML sanitisation, and role-based access control.
+rate limiting, HTML sanitisation, role-based access control,
+audit log, WebSocket connectivity, and sort edge cases.
 """
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
-from backend.api.routes import _rate_limit_store
+from backend.api.routes import _audit_log, _rate_limit_store, _sort_recommendations
+from backend.models.schemas import ConfidenceLevel, Recommendation, SeverityLevel
 
 client = TestClient(app)
 
@@ -115,6 +117,19 @@ class TestAnalyzeEndpoint:
         response = client.post("/api/analyze", json=payload)
         assert response.status_code == 422
 
+    def test_venue_id_default(self) -> None:
+        """Payload without venue_id uses 'default'."""
+        payload = _full_valid_payload()
+        response = client.post("/api/analyze", json=payload)
+        assert response.status_code == 200
+
+    def test_venue_id_custom(self) -> None:
+        """Payload with custom venue_id is accepted."""
+        payload = _full_valid_payload()
+        payload["venue_id"] = "stadium-west"
+        response = client.post("/api/analyze", json=payload)
+        assert response.status_code == 200
+
 
 class TestIncidentEndpoint:
     """Tests for POST /api/incident."""
@@ -181,6 +196,20 @@ class TestSecurityHeaders:
         response = client.post("/api/analyze", json=_full_valid_payload())
         assert response.headers.get("X-Content-Type-Options") == "nosniff"
 
+    def test_hsts_header_present(self) -> None:
+        """Strict-Transport-Security (HSTS) header is present."""
+        response = client.get("/api/health")
+        hsts = response.headers.get("Strict-Transport-Security", "")
+        assert "max-age=" in hsts
+        assert "includeSubDomains" in hsts
+
+    def test_csp_includes_connect_src(self) -> None:
+        """CSP includes connect-src for WebSocket support."""
+        response = client.get("/api/health")
+        csp = response.headers.get("Content-Security-Policy", "")
+        assert "connect-src" in csp
+        assert "ws:" in csp
+
 
 class TestRateLimiting:
     """Tests for rate limiting on /api/incident."""
@@ -198,3 +227,111 @@ class TestRateLimiting:
         for i in range(10):
             response = client.post("/api/incident", json=incident)
             assert response.status_code == 200, f"Request {i+1} failed unexpectedly"
+
+    def test_rate_limit_exceeded_returns_429(self) -> None:
+        """The 11th request within the window should return 429."""
+        incident = {
+            "incident_id": "INC-RL2", "zone": "A1", "type": "security",
+            "description": "Rate limit test", "reporter_role": "steward",
+        }
+        # Send 10 requests (all should succeed)
+        for i in range(10):
+            response = client.post("/api/incident", json=incident)
+            assert response.status_code == 200, f"Request {i+1} failed unexpectedly"
+
+        # 11th request should be rate limited
+        response = client.post("/api/incident", json=incident)
+        assert response.status_code == 429
+        assert "Rate limit exceeded" in response.json()["detail"]
+
+
+class TestSortRecommendations:
+    """Tests for the _sort_recommendations utility function."""
+
+    def test_sort_with_unknown_severity(self) -> None:
+        """Unknown severity values should sort to the end (rank 99)."""
+        recs = [
+            Recommendation(
+                rule_id="test",
+                severity=SeverityLevel.HIGH,
+                action="Test action",
+                reason="Test reason",
+                affected_zone="A1",
+                confidence=ConfidenceLevel.LIKELY,
+            ),
+            Recommendation(
+                rule_id="test",
+                severity=SeverityLevel.CRITICAL,
+                action="Critical action",
+                reason="Critical reason",
+                affected_zone="A1",
+                confidence=ConfidenceLevel.CERTAIN,
+            ),
+            Recommendation(
+                rule_id="test",
+                severity=SeverityLevel.LOW,
+                action="Low action",
+                reason="Low reason",
+                affected_zone="A1",
+                confidence=ConfidenceLevel.ADVISORY,
+            ),
+        ]
+        sorted_recs = _sort_recommendations(recs)
+        severities = [r.severity for r in sorted_recs]
+        assert severities == [SeverityLevel.CRITICAL, SeverityLevel.HIGH, SeverityLevel.LOW]
+
+
+class TestAuditLog:
+    """Tests for the incident audit log endpoint."""
+
+    def setup_method(self) -> None:
+        """Clear the audit log before each test."""
+        _audit_log.clear()
+
+    def test_audit_log_empty_by_default(self) -> None:
+        """Audit log returns empty entries for a new venue."""
+        response = client.get("/api/audit?venue_id=test-venue")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["venue_id"] == "test-venue"
+        assert data["total_entries"] == 0
+        assert data["entries"] == []
+
+    def test_audit_log_records_analyze(self) -> None:
+        """Analyzing an incident records it in the audit log."""
+        payload = _full_valid_payload()
+        payload["venue_id"] = "audit-test"
+        client.post("/api/analyze", json=payload)
+
+        response = client.get("/api/audit?venue_id=audit-test")
+        data = response.json()
+        assert data["total_entries"] == 1
+        assert data["entries"][0]["incident_id"] == "INC-100"
+        assert data["entries"][0]["source"] == "analyze"
+
+    def test_audit_log_records_incident(self) -> None:
+        """The incident endpoint records to the default venue audit log."""
+        _rate_limit_store.clear()
+        incident = {
+            "incident_id": "INC-AUD", "zone": "B1", "type": "medical",
+            "description": "Test audit", "reporter_role": "steward",
+        }
+        client.post("/api/incident", json=incident)
+
+        response = client.get("/api/audit?venue_id=default")
+        data = response.json()
+        assert data["total_entries"] >= 1
+        incident_ids = [e["incident_id"] for e in data["entries"]]
+        assert "INC-AUD" in incident_ids
+
+
+class TestWebSocket:
+    """Tests for the WebSocket endpoint."""
+
+    def test_websocket_connects(self) -> None:
+        """WebSocket endpoint accepts connections."""
+        with client.websocket_connect("/api/ws") as ws:
+            ws.send_text("ping")
+            data = ws.receive_json()
+            assert data["type"] == "pong"
+            assert data["received"] == "ping"

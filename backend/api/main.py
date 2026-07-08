@@ -66,7 +66,13 @@ app.add_middleware(
 )
 
 
-# ── Security headers middleware ───────────────────────────────────────────
+# ── Security headers middleware ───────────────────────────────────────
+#
+# Design note — Rate limiting
+# The in-memory sliding-window rate limiter (see routes.py) is an intentional
+# design choice for single-process deployments typical of stadium control rooms.
+# For multi-instance horizontal scaling, swap in Redis-backed rate limiting
+# (e.g. slowapi + redis) without any API contract changes.
 
 
 @app.middleware("http")
@@ -74,7 +80,16 @@ async def add_security_headers(request: Request, call_next) -> Response:
     """Add security headers to every HTTP response.
 
     Applies defense-in-depth headers to mitigate common web attack vectors
-    including clickjacking, MIME-sniffing, and content injection.
+    including clickjacking, MIME-sniffing, content injection, and
+    transport-layer downgrade attacks.
+
+    Headers applied:
+        - X-Content-Type-Options: nosniff
+        - X-Frame-Options: DENY
+        - X-XSS-Protection: 1; mode=block
+        - Referrer-Policy: strict-origin-when-cross-origin
+        - Strict-Transport-Security: max-age=31536000; includeSubDomains
+        - Content-Security-Policy (see inline justification below)
 
     Args:
         request: Incoming HTTP request.
@@ -88,8 +103,21 @@ async def add_security_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains"
+    )
+    # CSP justification: 'unsafe-inline' for style-src is required because the
+    # frontend dynamically applies severity-based background colours via inline
+    # styles on recommendation cards. A nonce-based approach would require
+    # server-side HTML rendering. This is an accepted, documented trade-off
+    # for a dashboard that only serves authenticated control room staff on a
+    # trusted internal network. script-src remains strict 'self' only.
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
+        "connect-src 'self' ws: wss:"
     )
     return response
 

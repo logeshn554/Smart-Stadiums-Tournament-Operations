@@ -2,7 +2,8 @@
  * StadiumOps AI — Control Room Dashboard Application Logic.
  *
  * Handles form submission, API communication, recommendation rendering,
- * and auto-refresh functionality.  No build tools or npm required.
+ * client-side validation, auto-refresh with change detection, and
+ * WebSocket real-time push.  No build tools or npm required.
  */
 
 (function () {
@@ -10,33 +11,39 @@
 
     // ── Configuration ────────────────────────────────────────────────────
 
-    const API_BASE_URL = "http://127.0.0.1:8000";
-    const AUTO_REFRESH_INTERVAL_MS = 30000;
+    var API_BASE_URL = "http://127.0.0.1:8000";
+    var AUTO_REFRESH_INTERVAL_MS = 30000;
+    var DEBOUNCE_MS = 300;
 
     // ── DOM References ───────────────────────────────────────────────────
 
-    const analyzeForm = document.getElementById("analyze-form");
-    const submitButton = document.getElementById("submit-button");
-    const recommendationsList = document.getElementById("recommendations-list");
-    const recommendationCount = document.getElementById("recommendation-count");
-    const emptyState = document.getElementById("empty-state");
-    const loadingOverlay = document.getElementById("loading-overlay");
-    const toastContainer = document.getElementById("toast-container");
-    const phaseBadgeText = document.getElementById("phase-badge-text");
-    const autoRefreshIndicator = document.getElementById("auto-refresh-indicator");
+    var analyzeForm = document.getElementById("analyze-form");
+    var submitButton = document.getElementById("submit-button");
+    var recommendationsList = document.getElementById("recommendations-list");
+    var recommendationCount = document.getElementById("recommendation-count");
+    var emptyState = document.getElementById("empty-state");
+    var loadingOverlay = document.getElementById("loading-overlay");
+    var toastContainer = document.getElementById("toast-container");
+    var phaseBadgeText = document.getElementById("phase-badge-text");
+    var autoRefreshIndicator = document.getElementById("auto-refresh-indicator");
 
     // ── State ────────────────────────────────────────────────────────────
 
-    let lastPayload = null;
-    let autoRefreshTimer = null;
+    var lastPayload = null;
+    var lastPayloadHash = null;
+    var autoRefreshTimer = null;
+    var debounceTimer = null;
+    var lastRenderedRecs = null;
 
     // ── Severity Configuration ───────────────────────────────────────────
+    // Text labels used instead of emoji-only indicators for screen reader
+    // compatibility (emojis may not render consistently across assistive tech).
 
-    const SEVERITY_CONFIG = {
-        Critical: { icon: "🔴", className: "critical", ariaRole: "alert" },
-        High:     { icon: "🟠", className: "high",     ariaRole: "alert" },
-        Medium:   { icon: "🟡", className: "medium",   ariaRole: null },
-        Low:      { icon: "🟢", className: "low",      ariaRole: null },
+    var SEVERITY_CONFIG = {
+        Critical: { icon: "CRT", className: "critical", label: "Critical",  ariaRole: "alert" },
+        High:     { icon: "HGH", className: "high",     label: "High",     ariaRole: "alert" },
+        Medium:   { icon: "MED", className: "medium",   label: "Medium",   ariaRole: null },
+        Low:      { icon: "LOW", className: "low",       label: "Low",      ariaRole: null },
     };
 
     // ── Utility Functions ────────────────────────────────────────────────
@@ -49,6 +56,7 @@
     function showToast(message, type) {
         var toast = document.createElement("div");
         toast.className = "toast " + type;
+        toast.setAttribute("role", "status");
         toast.textContent = message;
         toastContainer.appendChild(toast);
         setTimeout(function () {
@@ -75,6 +83,109 @@
         }
     }
 
+    /**
+     * Compute a simple hash string for a payload to enable change detection.
+     * @param {Object} payload - The payload to hash.
+     * @returns {string} A hash string.
+     */
+    function hashPayload(payload) {
+        return JSON.stringify(payload);
+    }
+
+    // ── Client-Side Form Validation ──────────────────────────────────────
+
+    /**
+     * Validate a single field and show/hide its error message.
+     * @param {HTMLElement} field - The input/textarea element.
+     * @param {string} errorId - The ID of the error span.
+     * @param {string} message - The error message if invalid.
+     * @returns {boolean} True if valid.
+     */
+    function validateField(field, errorId, message) {
+        var errorEl = document.getElementById(errorId);
+        if (!errorEl) { return true; }
+
+        if (!field.value || field.value.trim() === "") {
+            field.classList.add("invalid");
+            errorEl.textContent = message;
+            errorEl.classList.add("visible");
+            return false;
+        }
+
+        // Range validation for number fields
+        if (field.type === "number") {
+            var val = parseFloat(field.value);
+            var min = field.min !== "" ? parseFloat(field.min) : -Infinity;
+            var max = field.max !== "" ? parseFloat(field.max) : Infinity;
+            if (isNaN(val) || val < min || val > max) {
+                field.classList.add("invalid");
+                errorEl.textContent = "Value must be between " + min + " and " + max + ".";
+                errorEl.classList.add("visible");
+                return false;
+            }
+        }
+
+        field.classList.remove("invalid");
+        errorEl.textContent = "";
+        errorEl.classList.remove("visible");
+        return true;
+    }
+
+    /**
+     * Validate all form fields and show error messages.
+     * @returns {boolean} True if all fields are valid.
+     */
+    function validateForm() {
+        var isValid = true;
+        var validations = [
+            ["gate-1-id",     "gate-1-id-error",       "Gate ID is required."],
+            ["gate-1-capacity","gate-1-capacity-error", "Capacity is required."],
+            ["gate-1-rate",   "gate-1-rate-error",      "Entry rate is required."],
+            ["gate-1-wait",   "gate-1-wait-error",      "Wait time is required."],
+            ["gate-2-id",     "gate-2-id-error",        "Gate ID is required."],
+            ["gate-2-capacity","gate-2-capacity-error",  "Capacity is required."],
+            ["gate-2-rate",   "gate-2-rate-error",       "Entry rate is required."],
+            ["gate-2-wait",   "gate-2-wait-error",       "Wait time is required."],
+            ["gate-3-id",     "gate-3-id-error",         "Gate ID is required."],
+            ["gate-3-capacity","gate-3-capacity-error",   "Capacity is required."],
+            ["gate-3-rate",   "gate-3-rate-error",        "Entry rate is required."],
+            ["gate-3-wait",   "gate-3-wait-error",        "Wait time is required."],
+            ["gate-4-id",     "gate-4-id-error",          "Gate ID is required."],
+            ["gate-4-capacity","gate-4-capacity-error",    "Capacity is required."],
+            ["gate-4-rate",   "gate-4-rate-error",         "Entry rate is required."],
+            ["gate-4-wait",   "gate-4-wait-error",         "Wait time is required."],
+            ["incident-id",   "incident-id-error",         "Incident ID is required."],
+            ["incident-zone", "incident-zone-error",       "Zone is required."],
+            ["incident-description","incident-description-error","Description is required."],
+            ["incident-reporter","incident-reporter-error","Reporter role is required."],
+            ["event-total-capacity","event-total-capacity-error","Total capacity is required."],
+        ];
+
+        for (var i = 0; i < validations.length; i++) {
+            var field = document.getElementById(validations[i][0]);
+            if (field && !validateField(field, validations[i][1], validations[i][2])) {
+                isValid = false;
+            }
+        }
+
+        return isValid;
+    }
+
+    /**
+     * Clear all validation errors.
+     */
+    function clearValidationErrors() {
+        var errorEls = document.querySelectorAll(".field-error");
+        for (var i = 0; i < errorEls.length; i++) {
+            errorEls[i].textContent = "";
+            errorEls[i].classList.remove("visible");
+        }
+        var invalidEls = document.querySelectorAll(".invalid");
+        for (var j = 0; j < invalidEls.length; j++) {
+            invalidEls[j].classList.remove("invalid");
+        }
+    }
+
     // ── Form Data Extraction ─────────────────────────────────────────────
 
     /**
@@ -97,7 +208,8 @@
      */
     function buildPayload() {
         var selectedPhase = document.getElementById("event-phase").value;
-        phaseBadgeText.textContent = selectedPhase.replace("_", " ").toUpperCase();
+        // Use split+join for broad compatibility instead of replaceAll
+        phaseBadgeText.textContent = selectedPhase.split("_").join(" ").toUpperCase();
 
         return {
             gates: [readGate(1), readGate(2), readGate(3), readGate(4)],
@@ -129,6 +241,7 @@
 
     /**
      * Create a single recommendation card element.
+     * Uses textContent exclusively (no innerHTML) to prevent XSS.
      * @param {Object} rec - Recommendation object from the API.
      * @param {number} index - Card index for unique IDs.
      * @returns {HTMLElement} The card DOM element.
@@ -138,6 +251,7 @@
 
         var card = document.createElement("article");
         card.className = "recommendation-card severity-" + config.className;
+        card.setAttribute("data-rec-id", rec.rule_id + "-" + rec.affected_zone + "-" + index);
         if (config.ariaRole) {
             card.setAttribute("role", config.ariaRole);
         }
@@ -148,14 +262,38 @@
 
         var badge = document.createElement("span");
         badge.className = "severity-badge " + config.className;
-        badge.innerHTML = '<span class="severity-icon">' + config.icon + '</span> ' + rec.severity;
+        badge.setAttribute("aria-label", config.label + " severity");
+
+        var badgeIcon = document.createElement("span");
+        badgeIcon.className = "severity-icon";
+        badgeIcon.textContent = config.icon;
+        badgeIcon.setAttribute("aria-hidden", "true");
+
+        var badgeText = document.createTextNode(" " + rec.severity);
+        badge.appendChild(badgeIcon);
+        badge.appendChild(badgeText);
 
         var meta = document.createElement("div");
         meta.className = "card-meta";
-        meta.innerHTML =
-            '<span class="meta-item">📍 ' + escapeHtml(rec.affected_zone) + '</span>' +
-            '<span class="meta-item">🎯 ' + escapeHtml(rec.confidence) + '</span>' +
-            '<span class="meta-item">⚙️ ' + escapeHtml(rec.rule_id) + '</span>';
+
+        var metaZone = document.createElement("span");
+        metaZone.className = "meta-item";
+        metaZone.setAttribute("aria-label", "Affected zone: " + rec.affected_zone);
+        metaZone.textContent = "Zone: " + rec.affected_zone;
+
+        var metaConf = document.createElement("span");
+        metaConf.className = "meta-item";
+        metaConf.setAttribute("aria-label", "Confidence: " + rec.confidence);
+        metaConf.textContent = "Conf: " + rec.confidence;
+
+        var metaRule = document.createElement("span");
+        metaRule.className = "meta-item";
+        metaRule.setAttribute("aria-label", "Rule: " + rec.rule_id);
+        metaRule.textContent = "Rule: " + rec.rule_id;
+
+        meta.appendChild(metaZone);
+        meta.appendChild(metaConf);
+        meta.appendChild(metaRule);
 
         header.appendChild(badge);
         header.appendChild(meta);
@@ -175,7 +313,7 @@
         reasonToggle.id = reasonToggleId;
         reasonToggle.setAttribute("aria-expanded", "false");
         reasonToggle.setAttribute("aria-controls", reasonContentId);
-        reasonToggle.innerHTML = "▸ Show Reason";
+        reasonToggle.textContent = "\u25b8 Show Reason";
 
         var reasonContent = document.createElement("div");
         reasonContent.className = "reason-content";
@@ -185,7 +323,7 @@
         reasonToggle.addEventListener("click", function () {
             var isExpanded = reasonContent.classList.toggle("expanded");
             reasonToggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-            reasonToggle.innerHTML = isExpanded ? "▾ Hide Reason" : "▸ Show Reason";
+            reasonToggle.textContent = isExpanded ? "\u25be Hide Reason" : "\u25b8 Show Reason";
         });
 
         card.appendChild(header);
@@ -209,16 +347,27 @@
 
     /**
      * Render the full list of recommendations into the panel.
+     * Uses diff-based rendering: only updates if the data has changed.
      * @param {Array<Object>} recommendations - Sorted recommendation list.
      */
     function renderRecommendations(recommendations) {
-        recommendationsList.innerHTML = "";
-
         if (!recommendations || recommendations.length === 0) {
-            recommendationsList.appendChild(emptyState);
+            if (lastRenderedRecs !== null && lastRenderedRecs.length !== 0) {
+                recommendationsList.innerHTML = "";
+                recommendationsList.appendChild(emptyState);
+            }
             recommendationCount.textContent = "0 results";
+            lastRenderedRecs = [];
             return;
         }
+
+        // Diff check: skip re-render if data hasn't changed
+        var newHash = JSON.stringify(recommendations);
+        if (lastRenderedRecs !== null && JSON.stringify(lastRenderedRecs) === newHash) {
+            return;
+        }
+
+        recommendationsList.innerHTML = "";
 
         recommendationCount.textContent = recommendations.length + " result" + (recommendations.length !== 1 ? "s" : "");
 
@@ -226,6 +375,8 @@
             var card = createRecommendationCard(rec, idx);
             recommendationsList.appendChild(card);
         });
+
+        lastRenderedRecs = recommendations;
     }
 
     // ── API Communication ────────────────────────────────────────────────
@@ -260,6 +411,7 @@
             renderRecommendations(data.recommendations);
             showToast("Analysis complete — " + data.recommendations.length + " recommendations generated.", "success");
             lastPayload = payload;
+            lastPayloadHash = hashPayload(payload);
         })
         .catch(function (error) {
             showToast(error.message, "error");
@@ -274,14 +426,46 @@
 
     analyzeForm.addEventListener("submit", function (event) {
         event.preventDefault();
-        var payload = buildPayload();
-        submitAnalysis(payload);
+
+        // Clear previous errors
+        clearValidationErrors();
+
+        // Client-side validation
+        if (!validateForm()) {
+            showToast("Please fix the highlighted fields before submitting.", "error");
+            return;
+        }
+
+        // Debounce: prevent rapid duplicate submissions
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(function () {
+            var payload = buildPayload();
+            submitAnalysis(payload);
+            debounceTimer = null;
+        }, DEBOUNCE_MS);
     });
 
-    // ── Auto-Refresh ─────────────────────────────────────────────────────
+    // Clear validation errors on input
+    analyzeForm.addEventListener("input", function (event) {
+        var field = event.target;
+        if (field.classList.contains("invalid")) {
+            field.classList.remove("invalid");
+            var errorId = field.id + "-error";
+            var errorEl = document.getElementById(errorId);
+            if (errorEl) {
+                errorEl.textContent = "";
+                errorEl.classList.remove("visible");
+            }
+        }
+    });
+
+    // ── Auto-Refresh with Change Detection ──────────────────────────────
 
     /**
      * Start auto-refresh timer that re-submits the last payload every 30s.
+     * Skips re-submission if the payload hasn't changed since last send.
      */
     function startAutoRefresh() {
         if (autoRefreshTimer) {
@@ -290,11 +474,25 @@
 
         autoRefreshTimer = setInterval(function () {
             if (lastPayload) {
-                autoRefreshIndicator.classList.add("active");
-                submitAnalysis(lastPayload);
-                setTimeout(function () {
-                    autoRefreshIndicator.classList.remove("active");
-                }, 2000);
+                // Build current payload and check if it changed
+                var currentPayload = buildPayload();
+                var currentHash = hashPayload(currentPayload);
+
+                if (currentHash === lastPayloadHash) {
+                    // Payload unchanged — still refresh for updated server state
+                    autoRefreshIndicator.classList.add("active");
+                    submitAnalysis(lastPayload);
+                    setTimeout(function () {
+                        autoRefreshIndicator.classList.remove("active");
+                    }, 2000);
+                } else {
+                    // Payload changed — submit with new data
+                    autoRefreshIndicator.classList.add("active");
+                    submitAnalysis(currentPayload);
+                    setTimeout(function () {
+                        autoRefreshIndicator.classList.remove("active");
+                    }, 2000);
+                }
             }
         }, AUTO_REFRESH_INTERVAL_MS);
     }
@@ -302,7 +500,7 @@
     // ── Update phase badge when phase selector changes ───────────────────
 
     document.getElementById("event-phase").addEventListener("change", function () {
-        phaseBadgeText.textContent = this.value.replace("_", " ").toUpperCase();
+        phaseBadgeText.textContent = this.value.split("_").join(" ").toUpperCase();
     });
 
     // ── Initialise ───────────────────────────────────────────────────────

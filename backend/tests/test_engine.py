@@ -473,3 +473,12 @@ class TestEgressPlan:
         """Negative wait_time_seconds should be rejected by Pydantic."""
         with pytest.raises(Exception):
             _make_gate("G1", wait_time_seconds=-10)
+
+    def test_adversarial_zero_total_capacity(self) -> None:
+        """total_capacity=0 should be rejected by Pydantic (gt=0 constraint)."""
+        with pytest.raises(Exception):
+            _make_event(
+                phase=EventPhase.POST_MATCH,
+                total_capacity=0,
+                occupied_seats=0,
+            )

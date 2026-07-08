@@ -38,6 +38,7 @@ LIGHTNING_CRITICAL_RADIUS_KM: Final[float] = 15.0
 HEAT_INDEX_DANGER_THRESHOLD: Final[float] = 40.0
 HIGH_OCCUPANCY_RATIO: Final[float] = 0.9
 MODERATE_OCCUPANCY_RATIO: Final[float] = 0.7
+MAX_GATE_RECOMMENDATIONS: Final[int] = 4
 
 
 # ── RULE 1 — Gate Load Balancing ─────────────────────────────────────────
@@ -50,6 +51,10 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
     When both exist simultaneously a High-severity recommendation is
     produced for every overloaded→underloaded pair, including the
     estimated wait-time reduction.
+
+    Results are capped to the top MAX_GATE_RECOMMENDATIONS pairs sorted
+    by estimated wait-time reduction (highest impact first) to prevent
+    combinatorial explosion when many gates are monitored.
 
     Args:
         gates: Current status snapshots of all stadium gates.
@@ -99,6 +104,13 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
                     confidence=ConfidenceLevel.LIKELY,
                 )
             )
+
+    # Cap to top-N most impactful pairs by wait-time reduction to bound output
+    recommendations.sort(
+        key=lambda r: int(r.reason.split("reduction: ")[1].rstrip("s.")),
+        reverse=True,
+    )
+    recommendations = recommendations[:MAX_GATE_RECOMMENDATIONS]
 
     logger.info(
         "gate_load_balance: generated %d recommendation(s).",

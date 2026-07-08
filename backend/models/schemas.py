@@ -246,6 +246,10 @@ class Recommendation(BaseModel):
 class AnalyzeRequest(BaseModel):
     """Combined payload sent to the /api/analyze endpoint."""
 
+    venue_id: str = Field(
+        default="default", min_length=1, max_length=100,
+        description="Venue identifier for multi-venue tournament support",
+    )
     gates: list[GateStatus] = Field(
         ..., min_length=1,
         description="List of gate statuses (at least one required)",
