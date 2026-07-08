@@ -15,7 +15,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false  # set manually in Render dashboard
       - key: CORS_ALLOWED_ORIGINS
-        sync: false  # set to your frontend URL after deploying
+        value: https://stadiumops-dashboard.onrender.com
       - key: APP_ENV
         value: production
       - key: RATE_LIMIT_BACKEND
