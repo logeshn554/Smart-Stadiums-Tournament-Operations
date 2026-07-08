@@ -12,6 +12,14 @@ import sys
 
 import httpx
 
+# Avoid UnicodeEncodeError on Windows console when printing emojis/symbols
+if sys.platform.startswith("win"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 
 def build_simulation_payload() -> dict:
     """Construct a realistic halftime event snapshot.

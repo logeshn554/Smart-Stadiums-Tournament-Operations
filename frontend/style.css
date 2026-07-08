@@ -507,7 +507,7 @@ body {
 
 .severity-badge.medium {
     background: var(--color-medium);
-    color: #FFFFFF;
+    color: #0B0F19;
 }
 
 .severity-badge.low {
