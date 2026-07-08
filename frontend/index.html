@@ -25,6 +25,10 @@
                 <span class="pulse-dot" aria-hidden="true"></span>
                 <span id="phase-badge-text">HALFTIME</span>
             </div>
+            <div class="api-key-container">
+                <label for="gemini-api-key" class="sr-only">Gemini API Key</label>
+                <input type="password" id="gemini-api-key" placeholder="Enter Gemini API Key..." title="Optional. Paste your Gemini API key to activate real Generative AI." aria-label="Gemini API Key">
+            </div>
             <div class="auto-refresh-indicator" id="auto-refresh-indicator">
                 <span class="spinner" aria-hidden="true"></span>
                 <span>Auto-refresh: 30s</span>
@@ -284,18 +288,95 @@
             </form>
         </aside>
 
-        <!-- ── Right Panel: Recommendations ────────────────────────────── -->
+        <!-- ── Right Panel: Live Insights & Decision Support Tabs ──────────────── -->
         <section class="recommendations-panel" role="region" aria-label="Live Recommendations">
-            <div class="panel-header">
-                <h2 class="panel-title">Recommendations</h2>
-                <span class="recommendation-count" id="recommendation-count">0 results</span>
+            <div class="tabs-header" role="tablist">
+                <button class="tab-button active" id="tab-rules" aria-controls="panel-rules" aria-selected="true" role="tab">
+                    🛡️ Rules Engine
+                </button>
+                <button class="tab-button" id="tab-playbook" aria-controls="panel-playbook" aria-selected="false" role="tab">
+                    ✨ GenAI Playbook
+                </button>
+                <button class="tab-button" id="tab-chat" aria-controls="panel-chat" aria-selected="false" role="tab">
+                    💬 GenAI Chat Assistant
+                </button>
             </div>
-            <div id="recommendations-list">
-                <div class="empty-state" id="empty-state">
-                    <div class="empty-state-icon" aria-hidden="true">📋</div>
-                    <p class="empty-state-text">
-                        Submit event data to generate intelligent, ranked action recommendations for the control room.
-                    </p>
+
+            <!-- Tab Panel 1: Rules Engine -->
+            <div class="tab-content active" id="panel-rules" role="tabpanel" aria-labelledby="tab-rules">
+                <div class="panel-header">
+                    <h2 class="panel-title">Deterministic Safety Rules</h2>
+                    <span class="recommendation-count" id="recommendation-count">0 results</span>
+                </div>
+                <div id="recommendations-list">
+                    <div class="empty-state" id="empty-state">
+                        <div class="empty-state-icon" aria-hidden="true">📋</div>
+                        <p class="empty-state-text">
+                            Submit event data to generate intelligent, ranked action recommendations for the control room.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Panel 2: GenAI Playbook -->
+            <div class="tab-content" id="panel-playbook" role="tabpanel" aria-labelledby="tab-playbook">
+                <div class="panel-header">
+                    <h2 class="panel-title">Dynamic Tactical Playbook</h2>
+                    <button type="button" class="btn-secondary" id="generate-playbook-btn">⚡ Generate AI Playbook</button>
+                </div>
+                <div id="playbook-container">
+                    <div class="empty-state" id="playbook-empty-state">
+                        <div class="empty-state-icon" aria-hidden="true">✨</div>
+                        <p class="empty-state-text">
+                            Click 'Generate AI Playbook' to synthesize a real-time situation summary, tactical steps, and official FIFA translations.
+                        </p>
+                    </div>
+                    <div id="playbook-content" class="hidden">
+                        <div class="playbook-section">
+                            <h3>Situation Summary</h3>
+                            <div id="playbook-summary" class="briefing-box"></div>
+                        </div>
+                        <div class="playbook-section">
+                            <h3>Tactical Action Steps</h3>
+                            <ol id="playbook-steps" class="steps-list"></ol>
+                        </div>
+                        <div class="playbook-section">
+                            <h3>Multilingual PA Broadcasts (FIFA World Cup 2026)</h3>
+                            <div class="translation-grid">
+                                <div class="translation-box">
+                                    <div class="lang-label">🇺🇸 English</div>
+                                    <div id="announcement-en" class="announcement-text"></div>
+                                </div>
+                                <div class="translation-box">
+                                    <div class="lang-label">🇲🇽 Spanish</div>
+                                    <div id="announcement-es" class="announcement-text"></div>
+                                </div>
+                                <div class="translation-box">
+                                    <div class="lang-label">🇨🇦 French</div>
+                                    <div id="announcement-fr" class="announcement-text"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Panel 3: GenAI Chat Assistant -->
+            <div class="tab-content" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
+                <div class="panel-header">
+                    <h2 class="panel-title">Control Room Chat Support</h2>
+                </div>
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="chat-message assistant">
+                            Hello! I am your GenAI Control Room Assistant. I have live access to current turnstile feeds, weather updates, and reported incidents. Ask me how to handle specific situations or draft playbooks!
+                        </div>
+                    </div>
+                    <form id="chat-form" class="chat-form" novalidate>
+                        <label for="chat-input" class="sr-only">Message to assistant</label>
+                        <input type="text" id="chat-input" placeholder="Type an operational question (e.g. 'lightning protocol')..." required aria-label="Message to assistant">
+                        <button type="submit" class="chat-submit-btn" id="chat-submit-btn" aria-label="Send message">Send</button>
+                    </form>
                 </div>
             </div>
         </section>

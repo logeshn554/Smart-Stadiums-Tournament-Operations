@@ -285,3 +285,57 @@ class HealthResponse(BaseModel):
     version: str = Field(
         ..., description="API version",
     )
+
+
+# ---------------------------------------------------------------------------
+# GenAI request / response schemas
+# ---------------------------------------------------------------------------
+
+
+class PlaybookResponse(BaseModel):
+    """Response for the /api/genai/playbook endpoint."""
+
+    summary: str = Field(
+        ..., description="Operational situation summary"
+    )
+    steps: list[str] = Field(
+        ..., description="Chronological tactical steps for control room staff"
+    )
+    announcements: dict[str, str] = Field(
+        ..., description="Multilingual announcements (keys: en, es, fr)"
+    )
+
+
+class ChatRequest(BaseModel):
+    """Request for the /api/genai/chat endpoint."""
+
+    message: str = Field(
+        ..., min_length=1, max_length=500,
+        description="User message / question"
+    )
+    history: list[dict[str, str]] = Field(
+        default=[],
+        description="Chat history turns containing role and content"
+    )
+    gates: list[GateStatus] = Field(
+        ..., min_length=1,
+        description="List of gate statuses"
+    )
+    incident: IncidentReport = Field(
+        ..., description="Current incident report"
+    )
+    weather: WeatherContext = Field(
+        ..., description="Current weather snapshot"
+    )
+    event_context: EventContext = Field(
+        ..., description="Current event state"
+    )
+
+
+class ChatResponse(BaseModel):
+    """Response for the /api/genai/chat endpoint."""
+
+    reply: str = Field(
+        ..., description="GenAI assistant reply"
+    )
+

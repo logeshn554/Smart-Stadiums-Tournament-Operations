@@ -42,13 +42,21 @@ from backend.models.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     CallerRole,
+    ChatRequest,
+    ChatResponse,
     EventContext,
     EventPhase,
     HealthResponse,
     IncidentReport,
+    PlaybookResponse,
     Recommendation,
     SeverityLevel,
 )
+from backend.core.genai import (
+    chat_with_assistant,
+    generate_briefing_and_playbook,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -461,6 +469,52 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
         "total_entries": len(entries),
         "entries": entries,
     }
+
+
+@router.post("/genai/playbook", response_model=PlaybookResponse)
+async def genai_playbook_endpoint(
+    payload: AnalyzeRequest, request: Request
+) -> dict[str, Any]:
+    """Generate a dynamic control room playbook and announcements using Generative AI.
+
+    Accepts the same payload as /api/analyze. Reads optional X-Gemini-API-Key header.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
+    api_key = request.headers.get("X-Gemini-API-Key")
+    playbook = await generate_briefing_and_playbook(
+        gates=payload.gates,
+        incident=payload.incident,
+        weather=payload.weather,
+        event_context=payload.event_context,
+        api_key=api_key,
+    )
+    return playbook
+
+
+@router.post("/genai/chat", response_model=ChatResponse)
+async def genai_chat_endpoint(
+    payload: ChatRequest, request: Request
+) -> dict[str, Any]:
+    """Provide interactive decision support chat for control room operators.
+
+    Reads optional X-Gemini-API-Key header.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
+    api_key = request.headers.get("X-Gemini-API-Key")
+    reply = await chat_with_assistant(
+        message=payload.message,
+        history=payload.history,
+        gates=payload.gates,
+        incident=payload.incident,
+        weather=payload.weather,
+        event_context=payload.event_context,
+        api_key=api_key,
+    )
+    return {"reply": reply}
 
 
 @router.websocket("/ws")

@@ -34,6 +34,7 @@
     var autoRefreshTimer = null;
     var debounceTimer = null;
     var lastRenderedRecs = null;
+    var chatHistory = [];
 
     // ── Severity Configuration ───────────────────────────────────────────
     // Text labels used instead of emoji-only indicators for screen reader
@@ -412,6 +413,9 @@
             showToast("Analysis complete — " + data.recommendations.length + " recommendations generated.", "success");
             lastPayload = payload;
             lastPayloadHash = hashPayload(payload);
+
+            // Trigger the GenAI playbook generation in sync
+            fetchPlaybook(payload);
         })
         .catch(function (error) {
             showToast(error.message, "error");
@@ -495,6 +499,217 @@
                 }
             }
         }, AUTO_REFRESH_INTERVAL_MS);
+    }
+
+    // ── GenAI Feature Support Functions ──────────────────────────────────
+
+    /**
+     * Fetch situation playbook and multilingual announcements from the GenAI backend.
+     * @param {Object} payload - The stadium data payload.
+     */
+    function fetchPlaybook(payload) {
+        var apiKey = document.getElementById("gemini-api-key").value.trim();
+        var headers = { "Content-Type": "application/json" };
+        if (apiKey) {
+            headers["X-Gemini-API-Key"] = apiKey;
+        }
+
+        var playbookEmptyState = document.getElementById("playbook-empty-state");
+        var playbookContent = document.getElementById("playbook-content");
+        var generateBtn = document.getElementById("generate-playbook-btn");
+
+        generateBtn.disabled = true;
+        generateBtn.textContent = "⚡ Synthesizing...";
+
+        fetch(API_BASE_URL + "/api/genai/playbook", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(payload)
+        })
+        .then(function (response) {
+            if (!response.ok) {
+                throw new Error("GenAI Playbook synthesis failed: status " + response.status);
+            }
+            return response.json();
+        })
+        .then(function (data) {
+            document.getElementById("playbook-summary").textContent = data.summary;
+
+            var stepsList = document.getElementById("playbook-steps");
+            stepsList.innerHTML = "";
+            if (data.steps && data.steps.length > 0) {
+                data.steps.forEach(function (step) {
+                    var li = document.createElement("li");
+                    li.textContent = step;
+                    stepsList.appendChild(li);
+                });
+            }
+
+            document.getElementById("announcement-en").textContent = data.announcements.en || "";
+            document.getElementById("announcement-es").textContent = data.announcements.es || "";
+            document.getElementById("announcement-fr").textContent = data.announcements.fr || "";
+
+            playbookEmptyState.classList.add("hidden");
+            playbookContent.classList.remove("hidden");
+        })
+        .catch(function (error) {
+            showToast(error.message, "error");
+            console.error("[StadiumOps AI Playbook]", error);
+        })
+        .finally(function () {
+            generateBtn.disabled = false;
+            generateBtn.textContent = "⚡ Generate AI Playbook";
+        });
+    }
+
+    // ── Tab Management ───────────────────────────────────────────────────
+
+    var tabIds = ["rules", "playbook", "chat"];
+    tabIds.forEach(function (tabId) {
+        var button = document.getElementById("tab-" + tabId);
+        if (button) {
+            button.addEventListener("click", function () {
+                tabIds.forEach(function (tid) {
+                    var btn = document.getElementById("tab-" + tid);
+                    var content = document.getElementById("panel-" + tid);
+                    if (btn) {
+                        btn.classList.remove("active");
+                        btn.setAttribute("aria-selected", "false");
+                    }
+                    if (content) {
+                        content.classList.remove("active");
+                    }
+                });
+                button.classList.add("active");
+                button.setAttribute("aria-selected", "true");
+                var activeContent = document.getElementById("panel-" + tabId);
+                if (activeContent) {
+                    activeContent.classList.add("active");
+                }
+            });
+        }
+    });
+
+    // ── Gemini API Key persistence ───────────────────────────────────────
+
+    var apiKeyInput = document.getElementById("gemini-api-key");
+    if (apiKeyInput) {
+        var savedKey = localStorage.getItem("gemini_api_key");
+        if (savedKey) {
+            apiKeyInput.value = savedKey;
+        }
+        apiKeyInput.addEventListener("change", function () {
+            localStorage.setItem("gemini_api_key", apiKeyInput.value.trim());
+            showToast("Gemini API key updated.", "success");
+        });
+    }
+
+    // ── Playbook Manual Button ───────────────────────────────────────────
+
+    var generatePlaybookBtn = document.getElementById("generate-playbook-btn");
+    if (generatePlaybookBtn) {
+        generatePlaybookBtn.addEventListener("click", function () {
+            clearValidationErrors();
+            if (!validateForm()) {
+                showToast("Please fix validation errors before generating playbook.", "error");
+                return;
+            }
+            fetchPlaybook(buildPayload());
+        });
+    }
+
+    // ── Chat Assistant Form Submission ───────────────────────────────────
+
+    var chatForm = document.getElementById("chat-form");
+    var chatInput = document.getElementById("chat-input");
+    var chatMessages = document.getElementById("chat-messages");
+
+    if (chatForm && chatInput && chatMessages) {
+        chatForm.addEventListener("submit", function (e) {
+            e.preventDefault();
+            var message = chatInput.value.trim();
+            if (!message) { return; }
+
+            // 1. Render user message
+            var userMsg = document.createElement("div");
+            userMsg.className = "chat-message user";
+            userMsg.textContent = message;
+            chatMessages.appendChild(userMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            chatInput.value = "";
+
+            // 2. Build backend request payload
+            var apiKey = document.getElementById("gemini-api-key").value.trim();
+            var headers = { "Content-Type": "application/json" };
+            if (apiKey) {
+                headers["X-Gemini-API-Key"] = apiKey;
+            }
+
+            var currentPayload = buildPayload();
+            var chatPayload = {
+                message: message,
+                history: chatHistory,
+                gates: currentPayload.gates,
+                incident: currentPayload.incident,
+                weather: currentPayload.weather,
+                event_context: currentPayload.event_context
+            };
+
+            // Render temporary placeholder
+            var loaderMsg = document.createElement("div");
+            loaderMsg.className = "chat-message assistant";
+            loaderMsg.textContent = "...";
+            chatMessages.appendChild(loaderMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            var submitBtn = document.getElementById("chat-submit-btn");
+            if (submitBtn) { submitBtn.disabled = true; }
+
+            fetch(API_BASE_URL + "/api/genai/chat", {
+                method: "POST",
+                headers: headers,
+                body: JSON.stringify(chatPayload)
+            })
+            .then(function (response) {
+                if (response.status === 429) {
+                    throw new Error("Chat rate limit exceeded. Please wait a minute.");
+                }
+                if (!response.ok) {
+                    throw new Error("Chat request failed: status " + response.status);
+                }
+                return response.json();
+            })
+            .then(function (data) {
+                loaderMsg.remove();
+                var replyMsg = document.createElement("div");
+                replyMsg.className = "chat-message assistant";
+                replyMsg.textContent = data.reply;
+                chatMessages.appendChild(replyMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                // Update local conversational history
+                chatHistory.push({ role: "user", content: message });
+                chatHistory.push({ role: "assistant", content: data.reply });
+
+                if (chatHistory.length > 10) {
+                    chatHistory.shift();
+                    chatHistory.shift();
+                }
+            })
+            .catch(function (error) {
+                loaderMsg.remove();
+                var errMsg = document.createElement("div");
+                errMsg.className = "chat-message assistant";
+                errMsg.style.borderColor = "var(--color-critical)";
+                errMsg.textContent = "Error: " + error.message;
+                chatMessages.appendChild(errMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            })
+            .finally(function () {
+                if (submitBtn) { submitBtn.disabled = false; }
+            });
+        });
     }
 
     // ── Update phase badge when phase selector changes ───────────────────
