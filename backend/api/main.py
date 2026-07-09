@@ -1,5 +1,4 @@
-"""
-FastAPI application entry point for StadiumOps AI.
+"""FastAPI application entry point for StadiumOps AI.
 
 Configures the application, loads environment variables, attaches CORS
 middleware with security headers, and mounts the API router.
@@ -13,6 +12,7 @@ Security configuration:
 
 import logging
 import os
+from collections.abc import Callable
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
@@ -79,7 +79,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next) -> Response:
+async def add_security_headers(
+    request: Request, call_next: Callable[[Request], Response]
+) -> Response:
     """Add security headers to every HTTP response.
 
     Applies defense-in-depth headers to mitigate common web attack vectors

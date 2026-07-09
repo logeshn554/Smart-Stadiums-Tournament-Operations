@@ -1,5 +1,4 @@
-"""
-FastAPI route definitions for StadiumOps AI.
+"""FastAPI route definitions for StadiumOps AI.
 
 Provides five endpoints:
   POST /api/analyze   — full analysis with all five decision-engine rules
@@ -18,7 +17,6 @@ Security measures:
   - Severity-sorted response output
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -26,10 +24,10 @@ import re
 import sqlite3
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from backend.core.auth import verify_token
 from backend.core.decision_engine import (
@@ -38,6 +36,10 @@ from backend.core.decision_engine import (
     gate_load_balance,
     triage_incident,
     weather_action,
+)
+from backend.core.genai import (
+    chat_with_assistant,
+    generate_briefing_and_playbook,
 )
 from backend.models.schemas import (
     AnalyzeRequest,
@@ -53,11 +55,6 @@ from backend.models.schemas import (
     Recommendation,
     SeverityLevel,
 )
-from backend.core.genai import (
-    chat_with_assistant,
-    generate_briefing_and_playbook,
-)
-
 
 logger = logging.getLogger(__name__)
 
@@ -145,13 +142,17 @@ CRITICAL_INCIDENT_TYPES: Final[frozenset[str]] = frozenset({"fire_smoke"})
 MAX_AUDIT_ENTRIES: Final[int] = 100
 _audit_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
+_DB_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data",
+)
 _DB_PATH = os.path.join(_DB_DIR, "audit_log.db")
 
 def _init_db() -> bool:
     """Initialize the SQLite database for audit logging.
 
     Creates the data/ directory and the audit_log table if they do not exist.
+
     Returns:
         True if database was initialized successfully, False otherwise.
     """
@@ -177,7 +178,11 @@ def _init_db() -> bool:
         logger.info("Audit log SQLite database initialized successfully at %s", _DB_PATH)
         return True
     except Exception as exc:
-        logger.error("Failed to initialize SQLite database: %s. Falling back to in-memory audit log.", exc)
+        logger.error(
+            "Failed to initialize SQLite database: %s. Falling back to "
+            "in-memory audit log.",
+            exc,
+        )
         return False
 
 _sqlite_enabled = _init_db()
@@ -211,7 +216,10 @@ def _get_current_user(request: Request) -> dict[str, Any] | None:
         return None
 
     if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header format. Use: Bearer <token>")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header format. Use: Bearer <token>",
+        )
 
     token = auth_header.split("Bearer ", 1)[1]
     try:
@@ -330,7 +338,7 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
         incident: The incident report to log.
         source: Which endpoint recorded the entry ('analyze' or 'incident').
     """
-    timestamp_str = datetime.now(timezone.utc).isoformat()
+    timestamp_str = datetime.now(UTC).isoformat()
     entry = {
         "timestamp": timestamp_str,
         "source": source,
@@ -346,7 +354,10 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
             conn = sqlite3.connect(_DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO audit_log (timestamp, venue_id, source, incident_id, zone, type, description, reporter_role)
+                INSERT INTO audit_log (
+                    timestamp, venue_id, source, incident_id, zone, type,
+                    description, reporter_role
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp_str,
@@ -360,7 +371,11 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
             ))
             conn.commit()
             conn.close()
-            logger.info("Audit log: recorded %s via SQLite for venue %s", incident.incident_id, venue_id)
+            logger.info(
+                "Audit log: recorded %s via SQLite for venue %s",
+                incident.incident_id,
+                venue_id,
+            )
             return
         except Exception as exc:
             logger.error("SQLite insert failed: %s. Falling back to in-memory.", exc)
@@ -372,7 +387,12 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
     if len(log) > MAX_AUDIT_ENTRIES:
         _audit_log[venue_id] = log[-MAX_AUDIT_ENTRIES:]
 
-    logger.info("Audit log (in-memory): recorded %s from %s for venue %s", incident.incident_id, source, venue_id)
+    logger.info(
+        "Audit log (in-memory): recorded %s from %s for venue %s",
+        incident.incident_id,
+        source,
+        venue_id,
+    )
 
 
 async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
@@ -389,7 +409,7 @@ async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
 
     payload = json.dumps({
         "type": "recommendations_update",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "recommendations": [r.model_dump() for r in recommendations],
     })
 
@@ -433,7 +453,11 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
     """
     # ── Determine effective role (JWT takes precedence) ──
     jwt_payload = _get_current_user(request)
-    effective_role = CallerRole(jwt_payload["role"]) if jwt_payload and "role" in jwt_payload else payload.role
+    effective_role = (
+        CallerRole(jwt_payload["role"])
+        if jwt_payload and "role" in jwt_payload
+        else payload.role
+    )
 
     # ── RBAC: viewers cannot submit Critical-level incident types ──
     if (
@@ -592,8 +616,12 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
                     "description": r[5],
                     "reporter_role": r[6],
                 })
-            
-            logger.info("audit_endpoint: returning %d entries from SQLite for venue %s", len(entries), venue_id)
+
+            logger.info(
+                "audit_endpoint: returning %d entries from SQLite for venue %s",
+                len(entries),
+                venue_id,
+            )
             return {
                 "venue_id": venue_id,
                 "total_entries": len(entries),
@@ -603,7 +631,11 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
             logger.error("SQLite fetch failed: %s. Falling back to in-memory.", exc)
 
     entries = _audit_log.get(venue_id, [])
-    logger.info("audit_endpoint: returning %d entries from in-memory for venue %s", len(entries), venue_id)
+    logger.info(
+        "audit_endpoint: returning %d entries from in-memory for venue %s",
+        len(entries),
+        venue_id,
+    )
     return {
         "venue_id": venue_id,
         "total_entries": len(entries),

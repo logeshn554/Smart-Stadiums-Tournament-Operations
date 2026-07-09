@@ -1,5 +1,4 @@
-"""
-StadiumOps AI — Decision Engine.
+"""StadiumOps AI — Decision Engine.
 
 Pure, stateless, rule-based functions that accept typed domain objects and
 return ranked Recommendation lists.  This module has zero knowledge of HTTP,

@@ -1,17 +1,18 @@
-"""
-Unit and integration tests for the StadiumOps AI GenAI features.
+"""Unit and integration tests for the StadiumOps AI GenAI features.
 
 Validates GenAI playbook generation, chat assistant responses, fallback mock generators,
 API endpoints, rate limiting, and header authentication.
 """
 
+from typing import Never
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-import httpx
 
-from backend.api.main import app
 import backend.api.routes as _routes_module
-from backend.api.routes import _rate_limit_store, RATE_LIMIT_MAX
+from backend.api.main import app
+from backend.api.routes import RATE_LIMIT_MAX
 from backend.core.genai import (
     chat_with_assistant,
     generate_briefing_and_playbook,
@@ -24,6 +25,11 @@ from backend.models.schemas import (
 )
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _clear_env_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
 
 def _valid_gates() -> list[GateStatus]:
@@ -265,9 +271,9 @@ class TestGenAIHTTPCalls:
 
         # Mock the httpx.AsyncClient.post method
         class MockResponse:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.status_code = 200
-            def raise_for_status(self):
+            def raise_for_status(self) -> None:
                 pass
             def json(self):
                 return mock_response_json
@@ -304,9 +310,9 @@ class TestGenAIHTTPCalls:
         }
 
         class MockResponse:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.status_code = 200
-            def raise_for_status(self):
+            def raise_for_status(self) -> None:
                 pass
             def json(self):
                 return mock_response_json
@@ -326,7 +332,7 @@ class TestGenAIHTTPCalls:
         weather = _valid_weather()
         event = _valid_event()
 
-        async def mock_post_fail(self, url, json, timeout):
+        async def mock_post_fail(self, url, json, timeout) -> Never:
             raise httpx.HTTPStatusError("API Error", request=None, response=None)
 
         monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_fail)

@@ -1,5 +1,4 @@
-"""
-Integration tests for the StadiumOps AI FastAPI endpoints.
+"""Integration tests for the StadiumOps AI FastAPI endpoints.
 
 Contains exactly 29 tests targeting:
 - Authentication & JWT (3 tests)
@@ -19,8 +18,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
+from backend.api.routes import _rate_limit_store
 from backend.core.auth import create_access_token, verify_token
-from backend.api.routes import _rate_limit_store, _sweep_rate_limit_store, _SWEEP_INTERVAL_SECONDS
 
 client = TestClient(app)
 
@@ -59,7 +58,7 @@ VALID_PAYLOAD = {
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_create_and_verify_token_success():
+def test_create_and_verify_token_success() -> None:
     """Test 1: Creates a signed token and decodes it successfully."""
     token = create_access_token(role="admin", subject="test-user")
     payload = verify_token(token)
@@ -67,13 +66,13 @@ def test_create_and_verify_token_success():
     assert payload["sub"] == "test-user"
 
 
-def test_verify_token_invalid_format():
+def test_verify_token_invalid_format() -> None:
     """Test 2: Rejects malformed JWT tokens."""
     with pytest.raises(ValueError, match="Invalid or expired token"):
         verify_token("invalid.token.here")
 
 
-def test_verify_token_expired():
+def test_verify_token_expired() -> None:
     """Test 3: Rejects expired tokens."""
     # Create a token that expired 10 minutes ago
     with patch("backend.core.auth.TOKEN_EXPIRE_MINUTES", -10):
@@ -87,7 +86,7 @@ def test_verify_token_expired():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_health_endpoint():
+def test_health_endpoint() -> None:
     """Test 4: Health endpoint returns version and ok status."""
     res = client.get("/api/health")
     assert res.status_code == 200
@@ -101,7 +100,7 @@ def test_health_endpoint():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_analyze_success_with_jwt():
+def test_analyze_success_with_jwt() -> None:
     """Test 5: Runs full analysis with JWT token authorized."""
     token = create_access_token(role="admin")
     headers = {"Authorization": f"Bearer {token}"}
@@ -110,7 +109,7 @@ def test_analyze_success_with_jwt():
     assert "recommendations" in res.json()
 
 
-def test_analyze_success_fallback_role():
+def test_analyze_success_fallback_role() -> None:
     """Test 6: Runs full analysis using mock role field when no JWT is provided."""
     payload = VALID_PAYLOAD.copy()
     payload["role"] = "admin"
@@ -119,7 +118,7 @@ def test_analyze_success_fallback_role():
     assert len(res.json()["recommendations"]) > 0
 
 
-def test_analyze_unauthorized_viewer_critical_incident():
+def test_analyze_unauthorized_viewer_critical_incident() -> None:
     """Test 7: Prevents viewer role from submitting fire/smoke critical incidents."""
     payload = VALID_PAYLOAD.copy()
     payload["role"] = "viewer"
@@ -135,7 +134,7 @@ def test_analyze_unauthorized_viewer_critical_incident():
     assert "not authorised" in res.json()["detail"]
 
 
-def test_analyze_authorized_admin_critical_incident():
+def test_analyze_authorized_admin_critical_incident() -> None:
     """Test 8: Allows admin role to submit fire/smoke critical incidents."""
     payload = VALID_PAYLOAD.copy()
     payload["role"] = "admin"
@@ -153,7 +152,7 @@ def test_analyze_authorized_admin_critical_incident():
     assert "Critical" in severities
 
 
-def test_analyze_html_sanitization():
+def test_analyze_html_sanitization() -> None:
     """Test 9: Dynamic input descriptions strip HTML tags to prevent XSS."""
     payload = VALID_PAYLOAD.copy()
     payload["incident"] = {
@@ -171,7 +170,7 @@ def test_analyze_html_sanitization():
     assert "alert('XSS')" in triage_rec["reason"]
 
 
-def test_analyze_missing_gates():
+def test_analyze_missing_gates() -> None:
     """Test 10: Ensures Pydantic schema rejects empty gate list payload."""
     payload = VALID_PAYLOAD.copy()
     payload["gates"] = []
@@ -179,7 +178,7 @@ def test_analyze_missing_gates():
     assert res.status_code == 422
 
 
-def test_analyze_invalid_capacity():
+def test_analyze_invalid_capacity() -> None:
     """Test 11: Ensures Pydantic schema rejects invalid capacity percentage ranges."""
     payload = VALID_PAYLOAD.copy()
     payload["gates"] = [
@@ -189,7 +188,7 @@ def test_analyze_invalid_capacity():
     assert res.status_code == 422
 
 
-def test_analyze_occupied_exceeds_total_capacity():
+def test_analyze_occupied_exceeds_total_capacity() -> None:
     """Test 12: EventContext caps occupied seats to total capacity if it exceeds it."""
     payload = VALID_PAYLOAD.copy()
     payload["event_context"] = {
@@ -204,7 +203,7 @@ def test_analyze_occupied_exceeds_total_capacity():
     # Audit log should show capped status or process successfully without crashing
 
 
-def test_analyze_audit_logged():
+def test_analyze_audit_logged() -> None:
     """Test 13: Verifies that /api/analyze appends logs to the audit service."""
     payload = VALID_PAYLOAD.copy()
     payload["venue_id"] = "audit-test-venue"
@@ -223,7 +222,7 @@ def test_analyze_audit_logged():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_incident_triage_success():
+def test_incident_triage_success() -> None:
     """Test 14: Triage endpoint processes single incident successfully."""
     inc = {
         "incident_id": "INC-INC-1",
@@ -237,7 +236,7 @@ def test_incident_triage_success():
     assert "recommendations" in res.json()
 
 
-def test_incident_triage_rate_limiting():
+def test_incident_triage_rate_limiting() -> None:
     """Test 15: Validates sliding window IP rate limiting (429 status on 11th request)."""
     # Clean previous logs to isolate rate limit
     _rate_limit_store.clear()
@@ -260,7 +259,7 @@ def test_incident_triage_rate_limiting():
     assert "Rate limit exceeded" in res.json()["detail"]
 
 
-def test_incident_triage_sanitization():
+def test_incident_triage_sanitization() -> None:
     """Test 16: HTML tags stripped at incident triage layer."""
     _rate_limit_store.clear()
     inc = {
@@ -279,7 +278,7 @@ def test_incident_triage_sanitization():
 
 
 
-def test_incident_triage_audit_logged():
+def test_incident_triage_audit_logged() -> None:
     """Test 17: Incident triages are recorded under 'default' venue audit log."""
     _rate_limit_store.clear()
     inc = {
@@ -302,14 +301,14 @@ def test_incident_triage_audit_logged():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_audit_log_empty_by_default():
+def test_audit_log_empty_by_default() -> None:
     """Test 18: Unseen venues yield 0 audit entries."""
     res = client.get("/api/audit?venue_id=non-existent-venue")
     assert res.status_code == 200
     assert res.json()["total_entries"] == 0
 
 
-def test_audit_log_isolation_by_venue():
+def test_audit_log_isolation_by_venue() -> None:
     """Test 19: Venues maintain separate isolated audit stores."""
     payload_v1 = VALID_PAYLOAD.copy()
     payload_v1["venue_id"] = "Venue-1"
@@ -333,7 +332,7 @@ def test_audit_log_isolation_by_venue():
     assert "INC-V1" not in ids_v2
 
 
-def test_audit_log_bounded_capacity():
+def test_audit_log_bounded_capacity() -> None:
     """Test 20: Audit logs act as ring buffers, capping at 100 entries."""
     payload = VALID_PAYLOAD.copy()
     payload["venue_id"] = "bounded-venue"
@@ -356,7 +355,7 @@ def test_audit_log_bounded_capacity():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_genai_playbook_mock_fallback():
+def test_genai_playbook_mock_fallback() -> None:
     """Test 21: Playbook endpoint returns a mock playbook structure when no API key exists."""
     res = client.post("/api/genai/playbook", json=VALID_PAYLOAD)
     assert res.status_code == 200
@@ -366,7 +365,7 @@ def test_genai_playbook_mock_fallback():
     assert "announcements" in data
 
 
-def test_genai_chat_mock_fallback():
+def test_genai_chat_mock_fallback() -> None:
     """Test 22: Chat endpoint returns a mock response when no API key exists."""
     chat_payload = {
         "message": "We have a lost child in Section C.",
@@ -388,13 +387,13 @@ def test_genai_chat_mock_fallback():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_websocket_connection():
+def test_websocket_connection() -> None:
     """Test 23: WebSocket connection can be successfully established."""
     with client.websocket_connect("/api/ws") as websocket:
         assert websocket is not None
 
 
-def test_websocket_ping_pong():
+def test_websocket_ping_pong() -> None:
     """Test 24: Client receives a pong response for sent heartbeat strings."""
     with client.websocket_connect("/api/ws") as websocket:
         websocket.send_text("ping-test")
@@ -403,7 +402,7 @@ def test_websocket_ping_pong():
         assert data["received"] == "ping-test"
 
 
-def test_websocket_broadcast_on_incident():
+def test_websocket_broadcast_on_incident() -> None:
     """Test 25: WebSocket receives broadcast update when new incidents are triaged."""
     _rate_limit_store.clear()
     with client.websocket_connect("/api/ws") as websocket:
@@ -424,13 +423,13 @@ def test_websocket_broadcast_on_incident():
         assert len(data["recommendations"]) > 0
 
 
-def test_websocket_disconnect_cleanup():
+def test_websocket_disconnect_cleanup() -> None:
     """Test 26: Gracefully cleans connections list when clients disconnect."""
     # Ensure connections list is tracked
     from backend.api.routes import _ws_connections
     initial_len = len(_ws_connections)
 
-    with client.websocket_connect("/api/ws") as websocket:
+    with client.websocket_connect("/api/ws"):
         assert len(_ws_connections) == initial_len + 1
 
     # Out of context, client is disconnected
@@ -442,7 +441,7 @@ def test_websocket_disconnect_cleanup():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_cors_headers():
+def test_cors_headers() -> None:
     """Test 27: CORS headers allow access to localhost origins."""
     res = client.options("/api/health", headers={
         "Origin": "http://localhost:8080",
@@ -452,7 +451,7 @@ def test_cors_headers():
     assert res.headers.get("access-control-allow-origin") == "http://localhost:8080"
 
 
-def test_security_headers_present():
+def test_security_headers_present() -> None:
     """Test 28: Security headers are correctly added to response payloads."""
     res = client.get("/api/health")
     assert res.headers["x-content-type-options"] == "nosniff"
@@ -461,7 +460,7 @@ def test_security_headers_present():
     assert "Content-Security-Policy" in res.headers
 
 
-def test_gzip_compression_active():
+def test_gzip_compression_active() -> None:
     """Test 29: Middleware compresses payloads exceeding size threshold."""
     # Create large payload that exceeds 1000 bytes
     large_payload = VALID_PAYLOAD.copy()
@@ -481,11 +480,12 @@ def test_gzip_compression_active():
 # ═════════════════════════════════════════════════════════════════════════════
 
 import os
-import tempfile
 import shutil
-from unittest.mock import MagicMock, AsyncMock
+import tempfile
+from unittest.mock import AsyncMock, MagicMock
 
-def test_extra_claims_and_keypair_generation():
+
+def test_extra_claims_and_keypair_generation() -> None:
     """Test 30: Create access token with extra claims and verify keypair generation in clean state."""
     # Test extra claims
     token = create_access_token(role="admin", extra_claims={"custom_claim": "hello"})
@@ -499,7 +499,7 @@ def test_extra_claims_and_keypair_generation():
         with patch("backend.core.auth._KEYS_DIR", temp_dir), \
              patch("backend.core.auth._PRIVATE_KEY_PATH", os.path.join(temp_dir, "private.pem")), \
              patch("backend.core.auth._PUBLIC_KEY_PATH", os.path.join(temp_dir, "public.pem")):
-            
+
             # Call _load_keys directly on an empty directory will generate new keys internally (covers line 91)
             priv, pub = auth._load_keys()
             assert "BEGIN PRIVATE KEY" in priv
@@ -516,10 +516,10 @@ def test_extra_claims_and_keypair_generation():
 
 
 @pytest.mark.asyncio
-async def test_genai_real_api_mocked():
+async def test_genai_real_api_mocked() -> None:
     """Test 31: Test real Gemini API paths under mocked httpx response."""
-    from backend.core.genai import generate_briefing_and_playbook, chat_with_assistant
-    
+    from backend.core.genai import chat_with_assistant, generate_briefing_and_playbook
+
     mock_playbook_response = MagicMock()
     mock_playbook_response.status_code = 200
     mock_playbook_response.raise_for_status = MagicMock()
@@ -549,14 +549,14 @@ async def test_genai_real_api_mocked():
     with patch("httpx.AsyncClient.post") as mock_post:
         # 1. Test playbook endpoint with key
         mock_post.return_value = mock_playbook_response
-        
+
         # Test direct playbook generation function
-        from backend.models.schemas import GateStatus, IncidentReport, WeatherContext, EventContext
+        from backend.models.schemas import EventContext, GateStatus, IncidentReport, WeatherContext
         gates = [GateStatus(gate_id="G1", capacity_percent=50.0, entry_rate=10, wait_time_seconds=60)]
         incident = IncidentReport(incident_id="INC-1", zone="B1", type="medical", description="heat collapse", reporter_role="steward")
         weather = WeatherContext(temperature_celsius=30, heat_index=32, lightning_detected=False, lightning_radius_km=0)
         event_ctx = EventContext(phase="halftime", total_capacity=50000, occupied_seats=30000, accessible_seats_available=10, concession_queue_avg_minutes=5)
-        
+
         playbook = await generate_briefing_and_playbook(gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
         assert playbook["summary"] == "Test summary from Gemini"
 
@@ -574,7 +574,7 @@ async def test_genai_real_api_mocked():
         assert "Operational Guidance" in chat_fallback
 
 
-def test_invalid_authorization_formats_and_exceptions():
+def test_invalid_authorization_formats_and_exceptions() -> None:
     """Test 32: Test endpoint behavior with malformed headers or validation failures."""
     clean_payload = {
         "venue_id": "stadium-1",
@@ -614,23 +614,21 @@ def test_invalid_authorization_formats_and_exceptions():
     assert "Invalid or expired token" in res.json()["detail"]
 
 
-def test_redis_rate_limiting_coverage():
+def test_redis_rate_limiting_coverage() -> None:
     """Test 33: Mock Redis client connections to cover routes.py Redis-based rate limiting."""
-    from backend.api import routes
-    
     mock_redis = MagicMock()
     mock_redis.pipeline = MagicMock()
-    
+
     mock_pipeline = MagicMock()
     mock_pipeline.zremrangebyscore = MagicMock()
     mock_pipeline.zcard = MagicMock()
     mock_pipeline.zadd = MagicMock()
     mock_pipeline.expire = MagicMock()
-    
+
     # 1. Test rate limit exceeded
     mock_pipeline.execute = MagicMock(return_value=[None, 100])
     mock_redis.pipeline.return_value = mock_pipeline
-    
+
     with patch("backend.api.routes._redis_client", mock_redis):
         inc = {
             "incident_id": "INC-REDIS",
@@ -649,96 +647,95 @@ def test_redis_rate_limiting_coverage():
         assert res2.status_code == 200
 
 
-def test_redis_init_paths():
+def test_redis_init_paths() -> None:
     """Test 34: Test Redis client initialization block under successful and failing states."""
     import importlib
+
     from backend.api import routes
-    
+
     # 1. Force reload of routes with REDIS_URL set to local mock
     with patch("os.getenv", return_value="redis://mock-redis-host:6379"), \
          patch("redis.from_url") as mock_from_url:
-        
+
         mock_client = MagicMock()
         mock_client.ping = MagicMock(return_value=True)
         mock_from_url.return_value = mock_client
-        
+
         importlib.reload(routes)
         assert routes._redis_client is not None
 
     # 2. Force reload with REDIS_URL but ping fails
     with patch("os.getenv", return_value="redis://mock-redis-host:6379"), \
          patch("redis.from_url", side_effect=Exception("Connection refused")):
-        
+
         importlib.reload(routes)
         assert routes._redis_client is None
-        
+
     # Cleanup to ensure we leave routes in a clean state
     importlib.reload(routes)
 
 
-def test_direct_sanitize_description():
+def test_direct_sanitize_description() -> None:
     """Test 35: Direct call to _sanitize_description with HTML tags to cover logger line."""
     from backend.api.routes import _sanitize_description
     result = _sanitize_description("<p>Test</p> text")
     assert result == "Test text"
 
 
-def test_audit_log_sqlite_exception_fallback():
+def test_audit_log_sqlite_exception_fallback() -> None:
     """Test 36: Test SQLite exception path in _append_audit_entry falling back to in-memory log."""
     from backend.api import routes
-    
+
     with patch("backend.api.routes._sqlite_enabled", True), \
          patch("sqlite3.connect", side_effect=Exception("Database locked")):
-        
+
         from backend.models.schemas import IncidentReport
         for i in range(110):
             inc = IncidentReport(incident_id=f"INC-EXC-{i}", zone="A", type="medical", description="test desc", reporter_role="steward")
             routes._append_audit_entry("test-venue-fallback", inc, "test")
-        
+
         assert len(routes._audit_log["test-venue-fallback"]) == 100
         assert routes._audit_log["test-venue-fallback"][-1]["incident_id"] == "INC-EXC-109"
 
 
 @pytest.mark.asyncio
-async def test_ws_broadcast_exception():
+async def test_ws_broadcast_exception() -> None:
     """Test 37: Test exception handling inside _broadcast_ws when a client connection fails."""
     from backend.api import routes
-    
+
     mock_ws = MagicMock()
     mock_ws.send_text = AsyncMock(side_effect=Exception("Connection closed"))
-    
+
     routes._ws_connections.append(mock_ws)
-    
-    from backend.models.schemas import Recommendation, SeverityLevel, ConfidenceLevel
+
+    from backend.models.schemas import ConfidenceLevel, Recommendation, SeverityLevel
     rec = Recommendation(rule_id="test", severity=SeverityLevel.LOW, action="Action", reason="Reason", affected_zone="Zone", confidence=ConfidenceLevel.ADVISORY)
-    
+
     await routes._broadcast_ws([rec])
     assert mock_ws not in routes._ws_connections
 
 
-def test_audit_endpoint_sqlite_exception_fallback():
+def test_audit_endpoint_sqlite_exception_fallback() -> None:
     """Test 38: Test SQLite exception path in audit_endpoint falling back to in-memory log."""
-    from backend.api import routes
-    
     with patch("backend.api.routes._sqlite_enabled", True), \
          patch("sqlite3.connect", side_effect=Exception("Database corrupt")):
-        
+
         res = client.get("/api/audit?venue_id=default")
         assert res.status_code == 200
         assert "total_entries" in res.json()
 
 
-def test_websocket_endpoint_general_exception():
+def test_websocket_endpoint_general_exception() -> None:
     """Test 39: Test WebSocket connection handling when a general exception is raised."""
     with patch("fastapi.WebSocket.receive_text", side_effect=Exception("WS System Error")):
         try:
-            with client.websocket_connect("/api/ws") as websocket:
+            with client.websocket_connect("/api/ws"):
                 pass
         except Exception:
             pass
 
 
-def test_frontend_index_path_not_exists():
+def test_frontend_index_path_not_exists() -> None:
     """Test 40: Test frontend parsed_html fixture raises error when path doesn't exist."""
     from backend.tests.test_frontend import parsed_html
     func = getattr(parsed_html, "__wrapped__", parsed_html)
@@ -746,7 +743,7 @@ def test_frontend_index_path_not_exists():
         func()
 
 
-def test_sqlite_init_exception():
+def test_sqlite_init_exception() -> None:
     """Test 41: Test SQLite initialization failure fallback."""
     from backend.api import routes
     with patch("os.makedirs", side_effect=Exception("Permission denied")):
@@ -754,17 +751,17 @@ def test_sqlite_init_exception():
         assert result is False
 
 
-def test_generate_mock_playbook_branches():
+def test_generate_mock_playbook_branches() -> None:
     """Test 42: Test _generate_mock_playbook with fire_smoke, lightning, and gate congestion contexts."""
     from backend.core.genai import _generate_mock_playbook
-    from backend.models.schemas import GateStatus, IncidentReport, WeatherContext, EventContext
-    
+    from backend.models.schemas import EventContext, GateStatus, IncidentReport, WeatherContext
+
     gates = [
         GateStatus(gate_id="North-A", capacity_percent=90.0, entry_rate=45, wait_time_seconds=340),
         GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45)
     ]
     event_ctx = EventContext(phase="halftime", total_capacity=60000, occupied_seats=50000, accessible_seats_available=10, concession_queue_avg_minutes=5)
-    
+
     # 1. test fire_smoke branch
     inc_fire = IncidentReport(incident_id="INC-1", zone="B3", type="fire_smoke", description="smoke in B3", reporter_role="steward")
     weather_clear = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0)
@@ -778,38 +775,38 @@ def test_generate_mock_playbook_branches():
     assert "lightning" in pb_weather["summary"].lower()
 
 
-def test_generate_mock_chat_branches():
+def test_generate_mock_chat_branches() -> None:
     """Test 43: Test _generate_mock_chat with various operational keywords to cover all paths."""
     from backend.core.genai import _generate_mock_chat
-    from backend.models.schemas import GateStatus, IncidentReport, WeatherContext, EventContext
-    
+    from backend.models.schemas import EventContext, GateStatus, IncidentReport, WeatherContext
+
     gates = [
         GateStatus(gate_id="North-A", capacity_percent=90.0, entry_rate=45, wait_time_seconds=340),
         GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45)
     ]
     incident = IncidentReport(incident_id="INC-1", zone="B3", type="medical", description="collapsed", reporter_role="steward")
     event_ctx = EventContext(phase="halftime", total_capacity=60000, occupied_seats=50000, accessible_seats_available=10, concession_queue_avg_minutes=5)
-    
+
     # 1. fire / evac
     weather_clear = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0)
     reply_fire = _generate_mock_chat("fire evacuation protocol", [], gates, incident, weather_clear, event_ctx)
     assert "evacuation" in reply_fire.lower()
-    
+
     # 2. weather/lightning
     weather_lightning = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=True, lightning_radius_km=10.0)
     reply_weather = _generate_mock_chat("lightning warning status", [], gates, incident, weather_lightning, event_ctx)
     assert "lightning" in reply_weather.lower()
-    
+
     # 3. gate / redirect
     reply_gate = _generate_mock_chat("gate redirection", [], gates, incident, weather_clear, event_ctx)
     assert "overloaded" in reply_gate.lower()
-    
+
     # 4. weather but no lightning detected path
     reply_no_lightning = _generate_mock_chat("lightning storm check", [], gates, incident, weather_clear, event_ctx)
     assert "no lightning" in reply_no_lightning.lower()
 
 
-def test_rate_limit_memory_sweeper():
+def test_rate_limit_memory_sweeper() -> None:
     """Verify the lazy sweeper removes inactive IPs after the sweep interval."""
     import backend.api.routes as routes_module
 

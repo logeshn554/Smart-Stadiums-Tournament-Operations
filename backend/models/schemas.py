@@ -1,5 +1,4 @@
-"""
-Pydantic data models for StadiumOps AI.
+"""Pydantic data models for StadiumOps AI.
 
 Defines validated schemas for all inputs (gate status, incidents, weather,
 event context) and the output Recommendation model used by the decision engine.
@@ -10,13 +9,14 @@ the decision engine.
 
 import logging
 import re
-from enum import Enum
+from enum import StrEnum
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 
-class IncidentType(str, Enum):
+class IncidentType(StrEnum):
     """Enumeration of recognised incident categories."""
 
     MEDICAL = "medical"
@@ -26,7 +26,7 @@ class IncidentType(str, Enum):
     FIRE_SMOKE = "fire_smoke"
 
 
-class EventPhase(str, Enum):
+class EventPhase(StrEnum):
     """Enumeration of match phases."""
 
     PRE_MATCH = "pre_match"
@@ -35,7 +35,7 @@ class EventPhase(str, Enum):
     OVERTIME = "overtime"
 
 
-class SeverityLevel(str, Enum):
+class SeverityLevel(StrEnum):
     """Severity levels for recommendations, ordered from lowest to highest."""
 
     LOW = "Low"
@@ -44,7 +44,7 @@ class SeverityLevel(str, Enum):
     CRITICAL = "Critical"
 
 
-class ConfidenceLevel(str, Enum):
+class ConfidenceLevel(StrEnum):
     """Confidence qualifier attached to every recommendation."""
 
     CERTAIN = "Certain"
@@ -52,7 +52,7 @@ class ConfidenceLevel(str, Enum):
     ADVISORY = "Advisory"
 
 
-class CallerRole(str, Enum):
+class CallerRole(StrEnum):
     """Roles for mock authentication on API endpoints."""
 
     ADMIN = "admin"

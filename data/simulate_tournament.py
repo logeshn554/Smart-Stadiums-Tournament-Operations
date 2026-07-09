@@ -1,5 +1,4 @@
-"""
-StadiumOps AI — Tournament Operations Multi-Venue Simulator.
+"""StadiumOps AI — Tournament Operations Multi-Venue Simulator.
 
 Simulates 3 distinct FIFA World Cup 2026 venues during Quarter-Finals matchday:
 1. Northern Arena (Capacity: 65,000) - Post-match egress with crowd surge.
@@ -128,11 +127,11 @@ async def simulate_venue(name, client, payload):
         # Direct fallback evaluation using python module imports
         try:
             from backend.core.decision_engine import (
+                accessibility_routing,
+                egress_plan,
                 gate_load_balance,
                 triage_incident,
                 weather_action,
-                accessibility_routing,
-                egress_plan,
             )
             from backend.models.schemas import AnalyzeRequest
 

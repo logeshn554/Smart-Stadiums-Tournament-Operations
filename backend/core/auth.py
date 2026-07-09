@@ -1,5 +1,4 @@
-"""
-RS256 JWT authentication module for StadiumOps AI.
+"""RS256 JWT authentication module for StadiumOps AI.
 
 Provides token generation and verification using RSA-256 asymmetric keys.
 In production, the private key is used by an identity provider (IdP) to
@@ -18,12 +17,12 @@ Security Design:
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from jose import JWTError, jwt
-from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from jose import JWTError, jwt
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +108,7 @@ def create_access_token(
     Returns:
         A signed JWT string.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": subject,
         "role": role,

@@ -27,8 +27,17 @@ select = [
 ignore = [
     "D100",   # Missing docstring in public module
     "D104",   # Missing docstring in public package
-    "ANN101", # Missing type annotation for self
-    "ANN102", # Missing type annotation for cls
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = [
+    "S101",   # Use of assert detected (assert is expected in tests)
+    "S110",   # try-except-pass detected (fine in connection test cleanup)
+    "ANN",    # Missing type annotations (not useful to type-annotate test boilerplate)
+    "D",      # Missing docstring (no need for docstrings on test classes/methods)
+    "E501",   # Line too long (longer lines are acceptable in test statements/payloads)
+    "E402",   # Module level import not at top of file (needed for dynamic patching)
+    "B017",   # Blind exception assert (BaseException in tests)
 ]
 
 [tool.ruff.lint.pydocstyle]

@@ -1,14 +1,13 @@
-"""
-StadiumOps AI — Single-Venue Simulation Tool.
+"""StadiumOps AI — Single-Venue Simulation Tool.
 
 Reads matchday data from data/seed.json, sends it to the running FastAPI service,
 and prints the resulting ranked decision engine recommendations and playbooks.
 """
 
+import asyncio
 import json
 import os
 import sys
-import asyncio
 
 # Configure stdout to output UTF-8 (fixes UnicodeEncodeError on Windows)
 if hasattr(sys.stdout, "reconfigure"):
@@ -29,7 +28,7 @@ async def run_simulation():
         print(f"Error: Seed file not found at {SEED_PATH}")
         sys.exit(1)
 
-    with open(SEED_PATH, "r", encoding="utf-8") as f:
+    with open(SEED_PATH, encoding="utf-8") as f:
         payload = json.load(f)
 
     print("=" * 80)
@@ -81,11 +80,11 @@ async def run_simulation():
 
             # Direct fallback
             from backend.core.decision_engine import (
+                accessibility_routing,
+                egress_plan,
                 gate_load_balance,
                 triage_incident,
                 weather_action,
-                accessibility_routing,
-                egress_plan,
             )
             from backend.models.schemas import (
                 AnalyzeRequest,
