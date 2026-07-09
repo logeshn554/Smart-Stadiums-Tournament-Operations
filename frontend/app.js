@@ -11,7 +11,11 @@
 
     // ── Configuration ────────────────────────────────────────────────────
 
-    var API_BASE_URL = "https://smart-stadiums-tournament-operations-1.onrender.com";
+    var API_BASE_URL = (window.location.hostname === "localhost" || 
+                        window.location.hostname === "127.0.0.1" || 
+                        window.location.protocol === "file:") 
+                        ? "http://127.0.0.1:8000" 
+                        : "https://smart-stadiums-tournament-operations-1.onrender.com";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
 

@@ -1,0 +1,50 @@
+{
+  "venue_id": "default",
+  "gates": [
+    {
+      "gate_id": "North-A",
+      "capacity_percent": 88.0,
+      "entry_rate": 45,
+      "wait_time_seconds": 340
+    },
+    {
+      "gate_id": "North-B",
+      "capacity_percent": 92.0,
+      "entry_rate": 50,
+      "wait_time_seconds": 420
+    },
+    {
+      "gate_id": "South-A",
+      "capacity_percent": 25.0,
+      "entry_rate": 8,
+      "wait_time_seconds": 45
+    },
+    {
+      "gate_id": "South-B",
+      "capacity_percent": 60.0,
+      "entry_rate": 22,
+      "wait_time_seconds": 130
+    }
+  ],
+  "incident": {
+    "incident_id": "INC-001",
+    "zone": "B3",
+    "type": "medical",
+    "description": "Spectator collapsed near Row 14, appears heat exhaustion.",
+    "reporter_role": "section_steward"
+  },
+  "weather": {
+    "temperature_celsius": 38.0,
+    "heat_index": 41.0,
+    "lightning_detected": false,
+    "lightning_radius_km": 0.0
+  },
+  "event_context": {
+    "phase": "halftime",
+    "total_capacity": 60000,
+    "occupied_seats": 51000,
+    "accessible_seats_available": 12,
+    "concession_queue_avg_minutes": 9.2
+  },
+  "role": "admin"
+}

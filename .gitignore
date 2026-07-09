@@ -5,6 +5,7 @@ __pycache__/
 
 # Environment
 .env
+data/*.db
 
 # RSA keys (auto-generated at runtime)
 keys/

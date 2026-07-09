@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -98,12 +99,49 @@ _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
 CRITICAL_INCIDENT_TYPES: Final[frozenset[str]] = frozenset({"fire_smoke"})
 
-# ── In-memory incident audit log ─────────────────────────────────────────
+# ── Incident audit log persistence ─────────────────────────────────────────
 # Stores the last MAX_AUDIT_ENTRIES incidents per venue for traceability.
-# Production deployments should persist to a database.
+# Persists to SQLite database if enabled, falling back to in-memory store.
 
 MAX_AUDIT_ENTRIES: Final[int] = 100
 _audit_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
+_DB_PATH = os.path.join(_DB_DIR, "audit_log.db")
+
+def _init_db() -> bool:
+    """Initialize the SQLite database for audit logging.
+
+    Creates the data/ directory and the audit_log table if they do not exist.
+    Returns:
+        True if database was initialized successfully, False otherwise.
+    """
+    try:
+        os.makedirs(_DB_DIR, exist_ok=True)
+        conn = sqlite3.connect(_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                venue_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                incident_id TEXT NOT NULL,
+                zone TEXT NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                reporter_role TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+        logger.info("Audit log SQLite database initialized successfully at %s", _DB_PATH)
+        return True
+    except Exception as exc:
+        logger.error("Failed to initialize SQLite database: %s. Falling back to in-memory audit log.", exc)
+        return False
+
+_sqlite_enabled = _init_db()
 
 # ── WebSocket connection manager ─────────────────────────────────────────
 
@@ -242,18 +280,19 @@ def _sort_recommendations(
 
 
 def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) -> None:
-    """Append an incident to the in-memory audit log.
+    """Append an incident to the audit log.
 
-    Maintains a bounded ring buffer per venue, discarding the oldest
-    entries when MAX_AUDIT_ENTRIES is reached.
+    Persists to SQLite database if enabled, otherwise falls back to
+    maintaining a bounded in-memory ring buffer per venue.
 
     Args:
         venue_id: Venue identifier for multi-venue isolation.
         incident: The incident report to log.
         source: Which endpoint recorded the entry ('analyze' or 'incident').
     """
+    timestamp_str = datetime.now(timezone.utc).isoformat()
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp_str,
         "source": source,
         "incident_id": incident.incident_id,
         "zone": incident.zone,
@@ -261,13 +300,39 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
         "description": incident.description,
         "reporter_role": incident.reporter_role,
     }
+
+    if _sqlite_enabled:
+        try:
+            conn = sqlite3.connect(_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO audit_log (timestamp, venue_id, source, incident_id, zone, type, description, reporter_role)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                timestamp_str,
+                venue_id,
+                source,
+                incident.incident_id,
+                incident.zone,
+                incident.type,
+                incident.description,
+                incident.reporter_role
+            ))
+            conn.commit()
+            conn.close()
+            logger.info("Audit log: recorded %s via SQLite for venue %s", incident.incident_id, venue_id)
+            return
+        except Exception as exc:
+            logger.error("SQLite insert failed: %s. Falling back to in-memory.", exc)
+
+    # In-memory fallback
     log = _audit_log[venue_id]
     log.append(entry)
     # Maintain bounded size
     if len(log) > MAX_AUDIT_ENTRIES:
         _audit_log[venue_id] = log[-MAX_AUDIT_ENTRIES:]
 
-    logger.info("Audit log: recorded %s from %s for venue %s", incident.incident_id, source, venue_id)
+    logger.info("Audit log (in-memory): recorded %s from %s for venue %s", incident.incident_id, source, venue_id)
 
 
 async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
@@ -462,8 +527,43 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
     Returns:
         A dict with 'venue_id', 'total_entries', and 'entries' keys.
     """
+    if _sqlite_enabled:
+        try:
+            conn = sqlite3.connect(_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT timestamp, source, incident_id, zone, type, description, reporter_role
+                FROM audit_log
+                WHERE venue_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            """, (venue_id, MAX_AUDIT_ENTRIES))
+            rows = cursor.fetchall()
+            conn.close()
+
+            entries = []
+            for r in reversed(rows):
+                entries.append({
+                    "timestamp": r[0],
+                    "source": r[1],
+                    "incident_id": r[2],
+                    "zone": r[3],
+                    "type": r[4],
+                    "description": r[5],
+                    "reporter_role": r[6],
+                })
+            
+            logger.info("audit_endpoint: returning %d entries from SQLite for venue %s", len(entries), venue_id)
+            return {
+                "venue_id": venue_id,
+                "total_entries": len(entries),
+                "entries": entries,
+            }
+        except Exception as exc:
+            logger.error("SQLite fetch failed: %s. Falling back to in-memory.", exc)
+
     entries = _audit_log.get(venue_id, [])
-    logger.info("audit_endpoint: returning %d entries for venue %s", len(entries), venue_id)
+    logger.info("audit_endpoint: returning %d entries from in-memory for venue %s", len(entries), venue_id)
     return {
         "venue_id": venue_id,
         "total_entries": len(entries),
