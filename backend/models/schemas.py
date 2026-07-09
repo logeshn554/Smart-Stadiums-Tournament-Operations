@@ -236,6 +236,10 @@ class Recommendation(BaseModel):
     confidence: ConfidenceLevel = Field(
         ..., description="Confidence qualifier",
     )
+    sort_key: float | None = Field(
+        default=None, exclude=True,
+        description="Internal numeric key for sorting — excluded from API output",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.core.auth import create_access_token, verify_token
-from backend.api.routes import _rate_limit_store
+from backend.api.routes import _rate_limit_store, _sweep_rate_limit_store, _SWEEP_INTERVAL_SECONDS
 
 client = TestClient(app)
 
@@ -807,4 +807,38 @@ def test_generate_mock_chat_branches():
     # 4. weather but no lightning detected path
     reply_no_lightning = _generate_mock_chat("lightning storm check", [], gates, incident, weather_clear, event_ctx)
     assert "no lightning" in reply_no_lightning.lower()
+
+
+def test_rate_limit_memory_sweeper():
+    """Verify the lazy sweeper removes inactive IPs after the sweep interval."""
+    import backend.api.routes as routes_module
+
+    routes_module._rate_limit_store.clear()
+
+    # Simulate an IP that made requests 10 minutes ago (well outside the 60s window)
+    old_time = time.time() - 600
+    routes_module._rate_limit_store["192.168.1.100"] = [old_time]
+    routes_module._rate_limit_store["192.168.1.200"] = [old_time]
+    # Simulate an IP with a recent request (inside the window)
+    routes_module._rate_limit_store["192.168.1.300"] = [time.time()]
+
+    assert "192.168.1.100" in routes_module._rate_limit_store
+    assert "192.168.1.200" in routes_module._rate_limit_store
+    assert "192.168.1.300" in routes_module._rate_limit_store
+
+    # Force the sweeper to run by directly setting _last_sweep_time to epoch start
+    original_sweep_time = routes_module._last_sweep_time
+    try:
+        routes_module.__dict__["_last_sweep_time"] = 0.0
+
+        routes_module._sweep_rate_limit_store()
+
+        # Stale IPs should be removed
+        assert "192.168.1.100" not in routes_module._rate_limit_store
+        assert "192.168.1.200" not in routes_module._rate_limit_store
+        # Recent IP should still be present
+        assert "192.168.1.300" in routes_module._rate_limit_store
+    finally:
+        routes_module._rate_limit_store.clear()
+        routes_module.__dict__["_last_sweep_time"] = original_sweep_time
 

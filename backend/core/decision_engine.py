@@ -102,12 +102,13 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
                     ),
                     affected_zone=over_gate.gate_id,
                     confidence=ConfidenceLevel.LIKELY,
+                    sort_key=float(estimated_wait_reduction),
                 )
             )
 
     # Cap to top-N most impactful pairs by wait-time reduction to bound output
     recommendations.sort(
-        key=lambda r: int(r.reason.split("reduction: ")[1].rstrip("s.")),
+        key=lambda r: r.sort_key if r.sort_key is not None else 0.0,
         reverse=True,
     )
     recommendations = recommendations[:MAX_GATE_RECOMMENDATIONS]

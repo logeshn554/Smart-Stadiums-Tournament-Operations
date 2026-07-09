@@ -95,7 +95,46 @@ if _REDIS_URL:
 # In-memory fallback store
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
+# ── Lazy periodic memory sweeper for in-memory rate limiter ────────────────
+# Removes IP keys whose timestamp lists are empty or fully expired.
+# Runs at most once every _SWEEP_INTERVAL_SECONDS to avoid per-request overhead.
+
+_SWEEP_INTERVAL_SECONDS: Final[int] = 300  # 5 minutes
+_last_sweep_time: float = time.time()
+
+
+def _sweep_rate_limit_store() -> None:
+    """Remove inactive IP entries from the in-memory rate limit store.
+
+    Called lazily at the start of each rate-limit check.  Only performs
+    work when at least ``_SWEEP_INTERVAL_SECONDS`` have elapsed since
+    the previous sweep, keeping per-request overhead near zero.
+
+    This prevents unbounded dictionary growth in long-running
+    single-process deployments.
+    """
+    global _last_sweep_time  # noqa: PLW0603
+    now = time.time()
+    if now - _last_sweep_time < _SWEEP_INTERVAL_SECONDS:
+        return
+
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    stale_keys = [
+        ip for ip, timestamps in _rate_limit_store.items()
+        if not any(ts > window_start for ts in timestamps)
+    ]
+    for key in stale_keys:
+        del _rate_limit_store[key]
+
+    if stale_keys:
+        logger.info(
+            "Rate-limit sweeper: removed %d inactive IP(s).", len(stale_keys),
+        )
+    _last_sweep_time = now
+
+
 # ── Incident types that require admin privileges ──────────────────────────
+
 
 CRITICAL_INCIDENT_TYPES: Final[frozenset[str]] = frozenset({"fire_smoke"})
 
@@ -197,6 +236,7 @@ def _check_rate_limit(client_ip: str) -> None:
     Raises:
         HTTPException: 429 if the rate limit is exceeded.
     """
+    _sweep_rate_limit_store()
     now = time.time()
 
     if _redis_client is not None:

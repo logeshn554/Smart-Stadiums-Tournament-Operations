@@ -1,7 +1,7 @@
 # StadiumOps AI
 
 [![CI](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations/actions/workflows/ci.yml/badge.svg)](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen)](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations)
+[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/logeshn554/Smart-Stadiums-Tournament-Operations)
 [![Security: bandit](https://img.shields.io/badge/security-bandit%20clean-brightgreen)](https://github.com/PyCQA/bandit)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000)](https://github.com/astral-sh/ruff)

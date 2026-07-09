@@ -18,6 +18,8 @@
                         : "https://smart-stadiums-tournament-operations-1.onrender.com";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
+    var DATA_MODE = "server";  // "server" or "local"
+    var SEED_JSON_URL = "../data/seed.json";
 
     // ── DOM References ───────────────────────────────────────────────────
 
@@ -430,6 +432,62 @@
         });
     }
 
+    /**
+     * Load seed.json and render it as mock recommendations (Local File mode).
+     * Bypasses the backend entirely for offline/demo scenarios.
+     * @param {Object} payload - The form-built payload (used for toast only).
+     */
+    function submitLocalAnalysis(payload) {
+        setLoading(true);
+        fetch(SEED_JSON_URL)
+        .then(function (response) {
+            if (!response.ok) {
+                throw new Error("Could not load seed.json (status " + response.status + ")");
+            }
+            return response.json();
+        })
+        .then(function (seedData) {
+            // Build mock recommendations from seed data
+            var mockRecs = [
+                {
+                    rule_id: "gate_load_balance",
+                    severity: "High",
+                    action: "Redirect flow from overloaded gates to underloaded gates.",
+                    reason: "Gate imbalance detected in seed data — some gates above 80% while others below 40%.",
+                    affected_zone: seedData.gates ? seedData.gates[0].gate_id : "N/A",
+                    confidence: "Likely"
+                },
+                {
+                    rule_id: "triage_incident",
+                    severity: seedData.incident && seedData.incident.type === "fire_smoke" ? "Critical" : "High",
+                    action: "Dispatch " + (seedData.incident ? seedData.incident.type : "unknown") + " response team to zone " + (seedData.incident ? seedData.incident.zone : "N/A") + ".",
+                    reason: seedData.incident ? seedData.incident.description : "Incident reported.",
+                    affected_zone: seedData.incident ? seedData.incident.zone : "N/A",
+                    confidence: "Confirmed"
+                },
+                {
+                    rule_id: "weather_action",
+                    severity: seedData.weather && seedData.weather.heat_index >= 40 ? "High" : "Low",
+                    action: "Activate hydration protocol — heat index at " + (seedData.weather ? seedData.weather.heat_index : "N/A") + "°C.",
+                    reason: "Heat index exceeds safety threshold.",
+                    affected_zone: "Stadium-wide",
+                    confidence: "Likely"
+                }
+            ];
+            renderRecommendations(mockRecs);
+            showToast("Local file mode — " + mockRecs.length + " mock recommendations generated from seed.json.", "success");
+            lastPayload = payload;
+            lastPayloadHash = hashPayload(payload);
+        })
+        .catch(function (error) {
+            showToast("Local mode error: " + error.message, "error");
+            console.error("[StadiumOps AI Local]", error);
+        })
+        .finally(function () {
+            setLoading(false);
+        });
+    }
+
     // ── Event Listeners ──────────────────────────────────────────────────
 
     analyzeForm.addEventListener("submit", function (event) {
@@ -450,7 +508,11 @@
         }
         debounceTimer = setTimeout(function () {
             var payload = buildPayload();
-            submitAnalysis(payload);
+            if (DATA_MODE === "local") {
+                submitLocalAnalysis(payload);
+            } else {
+                submitAnalysis(payload);
+            }
             debounceTimer = null;
         }, DEBOUNCE_MS);
     });
@@ -735,6 +797,16 @@
             .finally(function () {
                 if (submitBtn) { submitBtn.disabled = false; }
             });
+        });
+    }
+
+    // ── Data Mode Toggle ─────────────────────────────────────────────────
+
+    var dataModeSelect = document.getElementById("data-mode-select");
+    if (dataModeSelect) {
+        dataModeSelect.addEventListener("change", function () {
+            DATA_MODE = this.value;
+            showToast("Switched to " + (DATA_MODE === "server" ? "Server" : "Local File") + " mode.", "success");
         });
     }
 
