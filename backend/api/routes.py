@@ -654,7 +654,7 @@ async def genai_playbook_endpoint(
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
-    api_key = request.headers.get("X-Gemini-API-Key")
+    api_key = request.headers.get("X-Groq-API-Key")
     playbook = await generate_briefing_and_playbook(
         gates=payload.gates,
         incident=payload.incident,
@@ -676,7 +676,7 @@ async def genai_chat_endpoint(
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
-    api_key = request.headers.get("X-Gemini-API-Key")
+    api_key = request.headers.get("X-Groq-API-Key")
     reply = await chat_with_assistant(
         message=payload.message,
         history=payload.history,
