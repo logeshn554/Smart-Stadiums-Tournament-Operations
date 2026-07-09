@@ -35,7 +35,7 @@ async def generate_briefing_and_playbook(
 ) -> dict[str, Any]:
     """Generate a control room briefing, playbook, and multilingual PA announcements.
 
-    Uses Gemini 1.5 Flash if an API key is available, otherwise falls back to
+    Uses Gemini 2.5 Flash if an API key is available, otherwise falls back to
     contextual mock responses.
     """
     effective_api_key = api_key or os.getenv("GEMINI_API_KEY")

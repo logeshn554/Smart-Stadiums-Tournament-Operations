@@ -816,6 +816,8 @@
         phaseBadgeText.textContent = this.value.split("_").join(" ").toUpperCase();
     });
 
+
+
     // ── Initialise ───────────────────────────────────────────────────────
 
     startAutoRefresh();

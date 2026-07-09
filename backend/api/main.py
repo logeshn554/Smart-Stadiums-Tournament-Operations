@@ -12,7 +12,7 @@ Security configuration:
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
@@ -80,7 +80,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.middleware("http")
 async def add_security_headers(
-    request: Request, call_next: Callable[[Request], Response]
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     """Add security headers to every HTTP response.
 
