@@ -15,7 +15,7 @@
                         window.location.hostname === "127.0.0.1" || 
                         window.location.protocol === "file:") 
                         ? "http://127.0.0.1:8000" 
-                        : "https://smart-stadiums-tournament-operations-1.onrender.com";
+                        : "https://smart-stadiums-tournament-operations-xz6g.onrender.com";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
     var DATA_MODE = "server";  // "server" or "local"
