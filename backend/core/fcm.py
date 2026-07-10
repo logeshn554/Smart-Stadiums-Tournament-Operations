@@ -1,8 +1,8 @@
 import logging
 import os
 import sqlite3
+import json
 from datetime import datetime, UTC
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,48 @@ DB_DIR = os.path.join(
     "data",
 )
 DB_PATH = os.path.join(DB_DIR, "audit_log.db")
+
+# Firebase Admin app instance (singleton)
+_firebase_app = None
+
+
+def _init_firebase_admin():
+    """Initialize Firebase Admin SDK using service account credentials from env vars."""
+    global _firebase_app
+    if _firebase_app is not None:
+        return _firebase_app
+
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+
+        # Support two modes:
+        # 1. FIREBASE_SERVICE_ACCOUNT_JSON env var containing the full service account JSON string
+        # 2. GOOGLE_APPLICATION_CREDENTIALS env var pointing to a service account JSON file path
+        sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if sa_json:
+            sa_dict = json.loads(sa_json)
+            cred = credentials.Certificate(sa_dict)
+        else:
+            cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            if not cred_path:
+                logger.info(
+                    "No Firebase service account credentials configured "
+                    "(FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS). "
+                    "FCM push notifications will be skipped."
+                )
+                return None
+            cred = credentials.Certificate(cred_path)
+
+        if not firebase_admin._apps:
+            _firebase_app = firebase_admin.initialize_app(cred)
+        else:
+            _firebase_app = firebase_admin.get_app()
+        logger.info("Firebase Admin SDK initialized successfully.")
+        return _firebase_app
+    except Exception as exc:
+        logger.error("Failed to initialize Firebase Admin SDK: %s", exc)
+        return None
 
 
 def is_sqlite_enabled() -> bool:
@@ -67,11 +109,34 @@ def get_tokens() -> list[str]:
     return list(_in_memory_tokens)
 
 
+def _delete_stale_tokens(stale_tokens: list[str]) -> None:
+    """Remove stale/expired FCM tokens from SQLite and in-memory store."""
+    global _in_memory_tokens
+    if not stale_tokens:
+        return
+
+    logger.info("Cleaning up %d stale FCM tokens.", len(stale_tokens))
+    if is_sqlite_enabled():
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.executemany(
+                "DELETE FROM fcm_tokens WHERE token = ?",
+                [(t,) for t in stale_tokens],
+            )
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.error("Failed to clean up stale FCM tokens in SQLite: %s", exc)
+
+    _in_memory_tokens = [t for t in _in_memory_tokens if t not in stale_tokens]
+
+
 async def send_fcm_notification(title: str, body: str) -> None:
-    """Send FCM notification to all registered tokens using the FCM Legacy HTTP API."""
-    fcm_server_key = os.getenv("FCM_SERVER_KEY")
-    if not fcm_server_key:
-        logger.info("FCM_SERVER_KEY not configured. Skipping push alert.")
+    """Send FCM push notification to all registered tokens using Firebase Admin SDK (HTTP v1 API)."""
+    app = _init_firebase_admin()
+    if app is None:
+        logger.info("Firebase Admin SDK not initialized. Skipping push alert.")
         return
 
     tokens = get_tokens()
@@ -79,53 +144,27 @@ async def send_fcm_notification(title: str, body: str) -> None:
         logger.info("No registered FCM tokens. Skipping push alert.")
         return
 
-    headers = {
-        "Authorization": f"key={fcm_server_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "registration_ids": tokens,
-        "notification": {
-            "title": title,
-            "body": body,
-        }
-    }
-
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://fcm.googleapis.com/fcm/send",
-                headers=headers,
-                json=payload,
-                timeout=10.0,
+        from firebase_admin import messaging
+
+        stale_tokens: list[str] = []
+
+        # Send to each token individually (MulticastMessage is more reliable per token)
+        for token in tokens:
+            msg = messaging.Message(
+                notification=messaging.Notification(title=title, body=body),
+                token=token,  # Registration token for the target device
             )
-            if response.status_code == 200:
-                res_data = response.json()
-                results = res_data.get("results", [])
-                stale_tokens = []
-                for i, result in enumerate(results):
-                    error = result.get("error")
-                    if error in ("NotRegistered", "InvalidRegistration"):
-                        stale_tokens.append(tokens[i])
+            try:
+                messaging.send(msg)
+                logger.info("FCM notification sent successfully to token: %s…", token[:20])
+            except messaging.UnregisteredError:
+                stale_tokens.append(token)
+                logger.warning("FCM token is unregistered (stale): %s…", token[:20])
+            except Exception as exc:
+                logger.error("Failed to send FCM to token %s…: %s", token[:20], exc)
 
-                if stale_tokens:
-                    logger.info("Cleaning up %d stale FCM tokens.", len(stale_tokens))
-                    if is_sqlite_enabled():
-                        try:
-                            conn = sqlite3.connect(DB_PATH)
-                            cursor = conn.cursor()
-                            cursor.executemany(
-                                "DELETE FROM fcm_tokens WHERE token = ?",
-                                [(t,) for t in stale_tokens],
-                            )
-                            conn.commit()
-                            conn.close()
-                        except Exception as exc:
-                            logger.error("Failed to clean up stale FCM tokens in SQLite: %s", exc)
+        _delete_stale_tokens(stale_tokens)
 
-                    global _in_memory_tokens
-                    _in_memory_tokens = [t for t in _in_memory_tokens if t not in stale_tokens]
-            else:
-                logger.error("FCM legacy API returned status code %d: %s", response.status_code, response.text)
     except Exception as exc:
-        logger.error("Failed to send FCM messages: %s", exc)
+        logger.error("FCM send_fcm_notification error: %s", exc)

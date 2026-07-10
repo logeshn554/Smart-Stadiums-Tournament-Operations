@@ -870,7 +870,7 @@ def test_fcm_endpoints() -> None:
 
 @pytest.mark.asyncio
 async def test_send_fcm_notification_integration() -> None:
-    """Verify that send_fcm_notification works under mock settings and cleans up invalid tokens."""
+    """Verify that send_fcm_notification works via Firebase Admin SDK and cleans up stale tokens."""
     from backend.core.fcm import add_token, get_tokens, send_fcm_notification, DB_PATH, is_sqlite_enabled
     from unittest.mock import MagicMock, patch
     import sqlite3
@@ -882,29 +882,27 @@ async def test_send_fcm_notification_integration() -> None:
         conn.commit()
         conn.close()
 
+    # Reset singleton
+    import backend.core.fcm as fcm_module
+    fcm_module._firebase_app = MagicMock()
+
     # Add tokens
     add_token("test-token-1")
     add_token("test-token-2")
     assert "test-token-1" in get_tokens()
 
-    # Mock response from FCM server
-    mock_fcm_response = MagicMock()
-    mock_fcm_response.status_code = 200
-    mock_fcm_response.json = MagicMock(return_value={
-        "multicast_id": 12345,
-        "success": 1,
-        "failure": 1,
-        "results": [
-            {"message_id": "1:ok"},
-            {"error": "NotRegistered"}
-        ]
-    })
+    from firebase_admin import messaging
 
-    with patch("httpx.AsyncClient.post", return_value=mock_fcm_response), \
-         patch("os.getenv", side_effect=lambda key, default=None: "mock-key" if key == "FCM_SERVER_KEY" else os.environ.get(key, default)):
+    def mock_send(msg):
+        """Raise UnregisteredError for test-token-2 to simulate stale token."""
+        if msg.token == "test-token-2":
+            raise messaging.UnregisteredError("Token not registered")
+        return "projects/test/messages/ok"
+
+    with patch("firebase_admin.messaging.send", side_effect=mock_send):
         await send_fcm_notification("Test Alert", "Detail")
 
-    # Verify that the NotRegistered token (test-token-2) was deleted, and test-token-1 remains
+    # Verify stale token (test-token-2) was deleted, test-token-1 remains
     tokens = get_tokens()
     assert "test-token-1" in tokens
     assert "test-token-2" not in tokens
