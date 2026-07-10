@@ -1,8 +1,17 @@
+"""Firebase Cloud Messaging (FCM) push notification module.
+
+Manages device token registration (SQLite-backed with in-memory fallback)
+and sends push alerts via the Firebase Admin SDK (HTTP v1 API).  Gracefully
+degrades when Firebase credentials are not configured -- notifications are
+silently skipped without crashing the application.
+"""
+
+import json
 import logging
 import os
 import sqlite3
-import json
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +28,7 @@ DB_PATH = os.path.join(DB_DIR, "audit_log.db")
 _firebase_app = None
 
 
-def _init_firebase_admin():
+def _init_firebase_admin() -> Any:  # noqa: ANN401
     """Initialize Firebase Admin SDK using service account credentials from env vars."""
     global _firebase_app
     if _firebase_app is not None:
@@ -61,12 +70,12 @@ def _init_firebase_admin():
 def is_sqlite_enabled() -> bool:
     """Check if the SQLite database is enabled and contains the fcm_tokens table."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fcm_tokens'")
-        res = cursor.fetchone()
-        conn.close()
-        return res is not None
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='fcm_tokens'"
+            )
+            return cursor.fetchone() is not None
     except Exception:
         return False
 
@@ -75,14 +84,12 @@ def add_token(token: str) -> None:
     """Store FCM registration token in SQLite or in-memory fallback."""
     if is_sqlite_enabled():
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR IGNORE INTO fcm_tokens (token, registered_at) VALUES (?, ?)",
-                (token, datetime.now(UTC).isoformat()),
-            )
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO fcm_tokens (token, registered_at) VALUES (?, ?)",
+                    (token, datetime.now(UTC).isoformat()),
+                )
             logger.info("Successfully registered FCM token in SQLite.")
             return
         except Exception as exc:
@@ -97,12 +104,11 @@ def get_tokens() -> list[str]:
     """Retrieve all active registered FCM tokens."""
     if is_sqlite_enabled():
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT token FROM fcm_tokens")
-            rows = cursor.fetchall()
-            conn.close()
-            return [r[0] for r in rows]
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT token FROM fcm_tokens")
+                rows = cursor.fetchall()
+                return [r[0] for r in rows]
         except Exception as exc:
             logger.error("Failed to select FCM tokens from SQLite: %s", exc)
 
@@ -118,14 +124,12 @@ def _delete_stale_tokens(stale_tokens: list[str]) -> None:
     logger.info("Cleaning up %d stale FCM tokens.", len(stale_tokens))
     if is_sqlite_enabled():
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.executemany(
-                "DELETE FROM fcm_tokens WHERE token = ?",
-                [(t,) for t in stale_tokens],
-            )
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.executemany(
+                    "DELETE FROM fcm_tokens WHERE token = ?",
+                    [(t,) for t in stale_tokens],
+                )
         except Exception as exc:
             logger.error("Failed to clean up stale FCM tokens in SQLite: %s", exc)
 
@@ -133,7 +137,10 @@ def _delete_stale_tokens(stale_tokens: list[str]) -> None:
 
 
 async def send_fcm_notification(title: str, body: str) -> None:
-    """Send FCM push notification to all registered tokens using Firebase Admin SDK (HTTP v1 API)."""
+    """Send FCM push notification to all registered tokens.
+
+    Uses Firebase Admin SDK (HTTP v1 API).
+    """
     app = _init_firebase_admin()
     if app is None:
         logger.info("Firebase Admin SDK not initialized. Skipping push alert.")

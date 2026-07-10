@@ -34,31 +34,41 @@ logger = logging.getLogger(__name__)
 # ── Load environment variables ────────────────────────────────────────────
 load_dotenv()
 
+
 # ── Configure FCM Service Worker ──────────────────────────────────────────
 def _configure_service_worker() -> None:
     sw_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "frontend",
-        "firebase-messaging-sw.js"
+        "firebase-messaging-sw.js",
     )
     if os.path.exists(sw_path):
         try:
-            with open(sw_path, "r", encoding="utf-8") as f:
+            with open(sw_path, encoding="utf-8") as f:
                 content = f.read()
-            
+
             # Replace configuration placeholders with actual env variables
             content = content.replace("placeholder-api-key", os.getenv("FIREBASE_API_KEY", ""))
-            content = content.replace("placeholder-auth-domain", os.getenv("FIREBASE_AUTH_DOMAIN", ""))
-            content = content.replace("placeholder-project-id", os.getenv("FIREBASE_PROJECT_ID", ""))
-            content = content.replace("placeholder-storage-bucket", os.getenv("FIREBASE_STORAGE_BUCKET", ""))
-            content = content.replace("1234567890", os.getenv("FIREBASE_MESSAGING_SENDER_ID", "1234567890"))
+            content = content.replace(
+                "placeholder-auth-domain", os.getenv("FIREBASE_AUTH_DOMAIN", "")
+            )
+            content = content.replace(
+                "placeholder-project-id", os.getenv("FIREBASE_PROJECT_ID", "")
+            )
+            content = content.replace(
+                "placeholder-storage-bucket", os.getenv("FIREBASE_STORAGE_BUCKET", "")
+            )
+            content = content.replace(
+                "1234567890", os.getenv("FIREBASE_MESSAGING_SENDER_ID", "1234567890")
+            )
             content = content.replace("placeholder-app-id", os.getenv("FIREBASE_APP_ID", ""))
-            
+
             with open(sw_path, "w", encoding="utf-8") as f:
                 f.write(content)
             logger.info("Successfully configured FCM service worker with environment credentials.")
         except Exception as exc:
             logger.error("Failed to configure FCM service worker: %s", exc)
+
 
 _configure_service_worker()
 
@@ -83,9 +93,7 @@ _raw_origins = os.getenv(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,null",
 )
-allowed_origins = [
-    origin.strip() for origin in _raw_origins.split(",") if origin.strip()
-]
+allowed_origins = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -137,9 +145,7 @@ async def add_security_headers(
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # CSP justification: 'unsafe-inline' for style-src is required because the
     # frontend dynamically applies severity-based background colours via inline
     # styles on recommendation cards. A nonce-based approach would require
@@ -169,8 +175,7 @@ app.include_router(router)
 # ── Serve frontend static files ───────────────────────────────────────────
 # Mount the frontend directory so the dashboard is accessible at http://127.0.0.1:8000
 _frontend_path = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "frontend"
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "frontend"
 )
 if os.path.isdir(_frontend_path):
     app.mount("/", StaticFiles(directory=_frontend_path, html=True), name="frontend")

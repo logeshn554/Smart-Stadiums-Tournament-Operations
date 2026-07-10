@@ -23,6 +23,11 @@ select = [
     "SIM",  # flake8-simplify
     "ANN",  # flake8-annotations
     "D",    # pydocstyle
+    "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
+    "RSE",  # flake8-raise
+    "RUF",  # Ruff-specific rules
+    "ERA",  # eradicate (commented-out code)
 ]
 ignore = [
     "D100",   # Missing docstring in public module
@@ -39,6 +44,12 @@ ignore = [
     "E402",   # Module level import not at top of file (needed for dynamic patching)
     "B017",   # Blind exception assert (BaseException in tests)
 ]
+"data/*" = [
+    "T20",    # Allow print statements in CLI helper scripts
+    "ANN",    # Type annotations not required for simple simulation scripts
+    "D",      # Google-style docstrings not required for simulation scripts
+    "E501",   # Line length checks can be loose in script constants
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -50,4 +61,7 @@ known-first-party = ["backend"]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
 python_files = ["test_*.py"]
-
+filterwarnings = [
+    'ignore:datetime.datetime.utcnow\(\) is deprecated.*:DeprecationWarning',
+    'ignore:Message.token is deprecated.*:DeprecationWarning',
+]

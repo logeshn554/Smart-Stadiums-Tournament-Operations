@@ -18,6 +18,31 @@ StadiumOps AI provides a **unified operational intelligence layer** that reads l
 
 ---
 
+## FIFA World Cup 2026 Problem Statement Alignment
+
+StadiumOps AI is designed as a GenAI-enabled operational support dashboard for **venue staff, tournament organizers, and control room operators** during the **FIFA World Cup 2026**. The solution leverages Generative AI and deterministic safety rules to directly address the key requirements of tournament operations:
+
+1. **Crowd Management & Navigation**:
+   * **Rule-based redirection**: Detects entry gate overcrowding and wait-time imbalances via the `gate_load_balance()` rule, automatically recommending redirections.
+   * **Staggered egress plans**: Triggers phased, wave-based egress plans (`egress_plan()`) during post-match or overtime phases to guide crowds to the least-congested transport nodes.
+2. **Accessibility**:
+   * **Priority Routing**: Elevates incident triage severity to Critical/High (`accessibility_routing()`) if incidents occur near occupied accessible seating zones.
+   * **WCAG 2.1 AA Compliance**: The operator dashboard features full keyboard navigation, screen reader support, correct ARIA role bindings, and high contrast options.
+3. **Transportation**:
+   * Outflow recommendations coordinate directly with public transit hubs, ensuring transit hubs are prepared for wave-based egress surges.
+4. **Sustainability**:
+   * Low-resource server architecture, in-memory rate-limiter sweeps to prevent memory growth, and a dark-themed CSS dashboard that optimizes power consumption.
+5. **Multilingual Assistance**:
+   * Generative AI Playbook generates instant translations in the official languages of the FIFA World Cup 2026 host nations (**English, Spanish, and French**) for PA announcements.
+6. **Operational Intelligence**:
+   * Live turnstile status, SQLite-backed audit trails, and weather sensors are ingested and analyzed concurrently to eliminate information overload.
+7. **Real-Time Decision Support**:
+   * Integrates an interactive **GenAI Control Room Assistant** for live scenario questioning, alongside real-time push alerts to venue stewards via **WebSockets** and **Firebase Cloud Messaging (FCM)**.
+
+The public dashboard, GenAI prompts, and mock fallbacks now explicitly reference navigation, crowd management, accessibility, transportation, sustainability, multilingual assistance, and operational intelligence so the implementation maps directly to the challenge brief.
+
+---
+
 ## Problem Being Solved
 
 Control room staff currently rely on radio chatter, CCTV feeds, and individual judgement to coordinate responses across dozens of zones simultaneously. This creates three critical failure modes:

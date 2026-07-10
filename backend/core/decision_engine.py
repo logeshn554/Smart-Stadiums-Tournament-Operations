@@ -65,12 +65,8 @@ def gate_load_balance(gates: list[GateStatus]) -> list[Recommendation]:
         logger.debug("gate_load_balance: no gates provided, returning empty.")
         return []
 
-    overloaded_gates = [
-        g for g in gates if g.capacity_percent > GATE_OVERLOAD_THRESHOLD
-    ]
-    underloaded_gates = [
-        g for g in gates if g.capacity_percent < GATE_UNDERLOAD_THRESHOLD
-    ]
+    overloaded_gates = [g for g in gates if g.capacity_percent > GATE_OVERLOAD_THRESHOLD]
+    underloaded_gates = [g for g in gates if g.capacity_percent < GATE_UNDERLOAD_THRESHOLD]
 
     if not overloaded_gates or not underloaded_gates:
         return []
@@ -223,8 +219,7 @@ def weather_action(weather: WeatherContext) -> list[Recommendation]:
                 rule_id="weather_action",
                 severity=SeverityLevel.CRITICAL,
                 action=(
-                    "Suspend all outdoor activity immediately. "
-                    "Initiate shelter-in-place protocol."
+                    "Suspend all outdoor activity immediately. Initiate shelter-in-place protocol."
                 ),
                 reason=(
                     f"Lightning detected within {weather.lightning_radius_km:.1f} km "
@@ -272,7 +267,8 @@ def weather_action(weather: WeatherContext) -> list[Recommendation]:
 
     if recommendations:
         logger.info(
-            "weather_action: %d recommendation(s) triggered.", len(recommendations),
+            "weather_action: %d recommendation(s) triggered.",
+            len(recommendations),
         )
     return recommendations
 
@@ -280,9 +276,7 @@ def weather_action(weather: WeatherContext) -> list[Recommendation]:
 # ── RULE 4 — Accessibility Routing ───────────────────────────────────────
 
 
-def accessibility_routing(
-    context: EventContext, incident: IncidentReport
-) -> list[Recommendation]:
+def accessibility_routing(context: EventContext, incident: IncidentReport) -> list[Recommendation]:
     """Ensure accessible-seating zones receive priority attention during incidents.
 
     Triggers:
@@ -352,9 +346,7 @@ def accessibility_routing(
 # ── RULE 5 — Egress Plan ─────────────────────────────────────────────────
 
 
-def egress_plan(
-    context: EventContext, gates: list[GateStatus]
-) -> list[Recommendation]:
+def egress_plan(context: EventContext, gates: list[GateStatus]) -> list[Recommendation]:
     """Generate post-match or overtime egress recommendations.
 
     Only activates during post_match or overtime phases.  Recommends
@@ -378,9 +370,7 @@ def egress_plan(
 
     sorted_gates = sorted(gates, key=lambda g: g.capacity_percent)
     top_two_gates = sorted_gates[:2] if len(sorted_gates) >= 2 else sorted_gates
-    gate_list_text = ", ".join(
-        f"{g.gate_id} ({g.capacity_percent:.0f}%)" for g in top_two_gates
-    )
+    gate_list_text = ", ".join(f"{g.gate_id} ({g.capacity_percent:.0f}%)" for g in top_two_gates)
 
     recommendations: list[Recommendation] = []
 
@@ -413,7 +403,7 @@ def egress_plan(
                     f"Recommended exit gates: {gate_list_text}."
                 ),
                 reason=(
-                    f"Occupancy ratio is {occupancy_ratio:.0%} (70–89%). "
+                    f"Occupancy ratio is {occupancy_ratio:.0%} (70-89%). "
                     f"Moderate density; standard phased exit is advised."
                 ),
                 affected_zone="ALL",

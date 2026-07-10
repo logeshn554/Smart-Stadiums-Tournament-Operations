@@ -8,8 +8,8 @@ the decision engine.
 """
 
 import logging
-from html.parser import HTMLParser
 from enum import StrEnum
+from html.parser import HTMLParser
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -88,19 +88,25 @@ class GateStatus(BaseModel):
     """Real-time status of a single stadium entry/exit gate."""
 
     gate_id: str = Field(
-        ..., min_length=1, max_length=50,
+        ...,
+        min_length=1,
+        max_length=50,
         description="Unique identifier for the gate",
     )
     capacity_percent: float = Field(
-        ..., ge=0, le=100,
-        description="Current capacity utilisation (0–100 %)",
+        ...,
+        ge=0,
+        le=100,
+        description="Current capacity utilisation (0-100 %)",
     )
     entry_rate: int = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="People entering per minute",
     )
     wait_time_seconds: int = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="Estimated wait time in seconds",
     )
 
@@ -109,23 +115,32 @@ class IncidentReport(BaseModel):
     """A single incident reported by stadium staff."""
 
     incident_id: str = Field(
-        ..., min_length=1, max_length=50,
+        ...,
+        min_length=1,
+        max_length=50,
         description="Unique incident identifier",
     )
     zone: str = Field(
-        ..., min_length=1, max_length=50,
+        ...,
+        min_length=1,
+        max_length=50,
         description="Stadium zone where the incident occurred",
     )
     type: str = Field(
-        ..., min_length=1, max_length=50,
+        ...,
+        min_length=1,
+        max_length=50,
         description="Incident category",
     )
     description: str = Field(
-        ..., max_length=300,
+        ...,
+        max_length=300,
         description="Free-text description (max 300 chars, HTML stripped)",
     )
     reporter_role: str = Field(
-        ..., min_length=1, max_length=100,
+        ...,
+        min_length=1,
+        max_length=100,
         description="Role of the person reporting",
     )
 
@@ -143,9 +158,7 @@ class IncidentReport(BaseModel):
             stripper.feed(value)
             sanitised = stripper.get_text()
             if sanitised != value:
-                logger.warning(
-                    "HTML tags stripped from incident description input."
-                )
+                logger.warning("HTML tags stripped from incident description input.")
             return sanitised
         return value
 
@@ -161,8 +174,7 @@ class IncidentReport(BaseModel):
         known_types = {member.value for member in IncidentType}
         if value not in known_types:
             logger.warning(
-                "Unknown incident type received: '%s'. "
-                "Will be triaged as Low severity.",
+                "Unknown incident type received: '%s'. Will be triaged as Low severity.",
                 value,
             )
         return value
@@ -172,18 +184,24 @@ class WeatherContext(BaseModel):
     """Current weather conditions at the venue."""
 
     temperature_celsius: float = Field(
-        ..., ge=-50, le=60,
+        ...,
+        ge=-50,
+        le=60,
         description="Ambient temperature in Celsius (-50 to 60)",
     )
     heat_index: float = Field(
-        ..., ge=-50, le=80,
+        ...,
+        ge=-50,
+        le=80,
         description="Perceived temperature factoring humidity",
     )
     lightning_detected: bool = Field(
-        ..., description="Whether lightning has been detected nearby",
+        ...,
+        description="Whether lightning has been detected nearby",
     )
     lightning_radius_km: float = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="Distance of closest detected lightning in km",
     )
 
@@ -192,22 +210,27 @@ class EventContext(BaseModel):
     """Snapshot of the current event / match state."""
 
     phase: EventPhase = Field(
-        ..., description="Current match phase",
+        ...,
+        description="Current match phase",
     )
     total_capacity: int = Field(
-        ..., gt=0,
+        ...,
+        gt=0,
         description="Total venue seat capacity",
     )
     occupied_seats: int = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="Currently occupied seats",
     )
     accessible_seats_available: int = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="Remaining accessible seating slots",
     )
     concession_queue_avg_minutes: float = Field(
-        ..., ge=0,
+        ...,
+        ge=0,
         description="Average concession queue wait in minutes",
     )
 
@@ -220,8 +243,7 @@ class EventContext(BaseModel):
         """
         if self.occupied_seats > self.total_capacity:
             logger.warning(
-                "Occupied seats (%d) exceed total capacity (%d). "
-                "Capping to total capacity.",
+                "Occupied seats (%d) exceed total capacity (%d). Capping to total capacity.",
                 self.occupied_seats,
                 self.total_capacity,
             )
@@ -238,29 +260,36 @@ class Recommendation(BaseModel):
     """A single ranked, explainable action recommendation."""
 
     rule_id: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="Identifier of the rule that produced this",
     )
     severity: SeverityLevel = Field(
-        ..., description="Urgency level",
+        ...,
+        description="Urgency level",
     )
     action: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="Recommended action to take",
     )
     reason: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="Human-readable explanation",
     )
     affected_zone: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="Zone or gate affected",
     )
     confidence: ConfidenceLevel = Field(
-        ..., description="Confidence qualifier",
+        ...,
+        description="Confidence qualifier",
     )
     sort_key: float | None = Field(
-        default=None, exclude=True,
+        default=None,
+        exclude=True,
         description="Internal numeric key for sorting — excluded from API output",
     )
 
@@ -274,24 +303,31 @@ class AnalyzeRequest(BaseModel):
     """Combined payload sent to the /api/analyze endpoint."""
 
     venue_id: str = Field(
-        default="default", min_length=1, max_length=100,
+        default="default",
+        min_length=1,
+        max_length=100,
         description="Venue identifier for multi-venue tournament support",
     )
     gates: list[GateStatus] = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="List of gate statuses (at least one required)",
     )
     incident: IncidentReport = Field(
-        ..., description="Current incident report",
+        ...,
+        description="Current incident report",
     )
     weather: WeatherContext = Field(
-        ..., description="Current weather snapshot",
+        ...,
+        description="Current weather snapshot",
     )
     event_context: EventContext = Field(
-        ..., description="Current event state",
+        ...,
+        description="Current event state",
     )
     role: CallerRole = Field(
-        ..., description="Caller role — 'admin' or 'viewer'",
+        ...,
+        description="Caller role — 'admin' or 'viewer'",
     )
 
 
@@ -299,7 +335,8 @@ class AnalyzeResponse(BaseModel):
     """Response from the /api/analyze endpoint."""
 
     recommendations: list[Recommendation] = Field(
-        ..., description="Ranked list of recommendations (Critical first)",
+        ...,
+        description="Ranked list of recommendations (Critical first)",
     )
 
 
@@ -307,10 +344,12 @@ class HealthResponse(BaseModel):
     """Response from the /api/health endpoint."""
 
     status: str = Field(
-        ..., description="Service status",
+        ...,
+        description="Service status",
     )
     version: str = Field(
-        ..., description="API version",
+        ...,
+        description="API version",
     )
 
 
@@ -322,12 +361,8 @@ class HealthResponse(BaseModel):
 class PlaybookResponse(BaseModel):
     """Response for the /api/genai/playbook endpoint."""
 
-    summary: str = Field(
-        ..., description="Operational situation summary"
-    )
-    steps: list[str] = Field(
-        ..., description="Chronological tactical steps for control room staff"
-    )
+    summary: str = Field(..., description="Operational situation summary")
+    steps: list[str] = Field(..., description="Chronological tactical steps for control room staff")
     announcements: dict[str, str] = Field(
         ..., description="Multilingual announcements (keys: en, es, fr)"
     )
@@ -336,33 +371,17 @@ class PlaybookResponse(BaseModel):
 class ChatRequest(BaseModel):
     """Request for the /api/genai/chat endpoint."""
 
-    message: str = Field(
-        ..., min_length=1, max_length=500,
-        description="User message / question"
-    )
+    message: str = Field(..., min_length=1, max_length=500, description="User message / question")
     history: list[dict[str, str]] = Field(
-        default=[],
-        description="Chat history turns containing role and content"
+        default=[], description="Chat history turns containing role and content"
     )
-    gates: list[GateStatus] = Field(
-        ..., min_length=1,
-        description="List of gate statuses"
-    )
-    incident: IncidentReport = Field(
-        ..., description="Current incident report"
-    )
-    weather: WeatherContext = Field(
-        ..., description="Current weather snapshot"
-    )
-    event_context: EventContext = Field(
-        ..., description="Current event state"
-    )
+    gates: list[GateStatus] = Field(..., min_length=1, description="List of gate statuses")
+    incident: IncidentReport = Field(..., description="Current incident report")
+    weather: WeatherContext = Field(..., description="Current weather snapshot")
+    event_context: EventContext = Field(..., description="Current event state")
 
 
 class ChatResponse(BaseModel):
     """Response for the /api/genai/chat endpoint."""
 
-    reply: str = Field(
-        ..., description="GenAI assistant reply"
-    )
-
+    reply: str = Field(..., description="GenAI assistant reply")

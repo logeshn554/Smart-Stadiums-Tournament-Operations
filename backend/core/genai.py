@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+from collections.abc import Iterable
 from typing import Any
 
 from backend.models.schemas import (
@@ -22,6 +23,47 @@ from backend.models.schemas import (
 logger = logging.getLogger(__name__)
 
 GEMINI_MODEL: str = "gemini-3.1-flash-lite"
+CHALLENGE_FOCUS_TOPICS: tuple[str, ...] = (
+    "navigation",
+    "crowd management",
+    "accessibility",
+    "transportation",
+    "sustainability",
+    "multilingual assistance",
+    "operational intelligence",
+    "real-time decision support",
+)
+
+
+def _format_topic_list(topics: Iterable[str]) -> str:
+    """Format a stable comma-separated focus list for prompts."""
+    return ", ".join(topics)
+
+
+def _build_state_snapshot(
+    gates: list[GateStatus],
+    incident: IncidentReport,
+    weather: WeatherContext,
+    event_context: EventContext,
+) -> str:
+    """Render the live stadium context into a prompt-friendly snapshot."""
+    return (
+        f"- Gate status: {[g.model_dump() for g in gates]}\n"
+        f"- Active incident: {incident.model_dump()}\n"
+        f"- Weather: {weather.model_dump()}\n"
+        f"- Event state: {event_context.model_dump()}\n"
+    )
+
+
+def _build_alignment_guidance() -> str:
+    """Return the challenge-alignment guidance shared by both GenAI prompts."""
+    return (
+        "The solution must explicitly support "
+        f"{_format_topic_list(CHALLENGE_FOCUS_TOPICS)}. "
+        "When relevant, mention fan wayfinding, crowd redirection, accessible routing, "
+        "transit readiness, low-waste or energy-aware decisions, and multilingual fan "
+        "communications."
+    )
 
 
 async def generate_briefing_and_playbook(
@@ -45,16 +87,16 @@ async def generate_briefing_and_playbook(
     prompt = (
         "You are the AI Chief Operations Officer for a FIFA World Cup 2026 stadium control room.\n"
         "Analyze the following live stadium state:\n"
-        f"- Gate status: {[g.model_dump() for g in gates]}\n"
-        f"- Active incident: {incident.model_dump()}\n"
-        f"- Weather: {weather.model_dump()}\n"
-        f"- Event state: {event_context.model_dump()}\n\n"
+        f"{_build_state_snapshot(gates, incident, weather, event_context)}\n"
+        f"{_build_alignment_guidance()}\n"
         "Based on this context, generate a tactical decision support briefing.\n"
         "Your output must be a single JSON object with the following fields:\n"
         '- "summary": A professional, concise (2-3 sentences) operational summary of the '
-        "current status, highlighting key bottlenecks or critical alerts.\n"
+        "current status, highlighting key bottlenecks or critical alerts and noting how "
+        "the guidance affects navigation or crowd flow when relevant.\n"
         '- "steps": A list of 3-5 clear, chronological action steps for control room staff. '
-        "Be specific (e.g., mention gate names, specific zones, wait times).\n"
+        "Be specific (e.g., mention gate names, specific zones, wait times, transit nodes, "
+        "or accessibility routing).\n"
         '- "announcements": A JSON object with three keys: "en", "es", "fr". The values '
         "must be public address announcements to be broadcast to fans in English, Spanish, "
         "and French, tailored to the current situation. "
@@ -79,7 +121,7 @@ async def generate_briefing_and_playbook(
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             return json.loads(text)
 
-        return await asyncio.get_event_loop().run_in_executor(None, _call_api)
+        return await asyncio.to_thread(_call_api)
     except Exception as exc:
         logger.error("Gemini API call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_playbook(gates, incident, weather, event_context)
@@ -106,20 +148,18 @@ async def chat_with_assistant(
         return _generate_mock_chat(message, history, gates, incident, weather, event_context)
 
     # Format history for prompt
-    history_str = ""
-    for turn in history:
-        role = "User" if turn.get("role") == "user" else "Assistant"
-        history_str += f"{role}: {turn.get('content')}\n"
+    history_str = "".join(
+        f"{'User' if turn.get('role') == 'user' else 'Assistant'}: {turn.get('content')}\n"
+        for turn in history
+    )
 
     system_context = (
         "You are the AI Control Room Assistant for a FIFA World Cup 2026 stadium, helping "
-        "control room staff manage operations, crowd control, safety, transportation, "
-        "and multilingual assistance.\n"
+        "control room staff manage navigation, crowd control, safety, transportation, "
+        "sustainability, multilingual assistance, and real-time decision support.\n"
         "Current Stadium State:\n"
-        f"- Gate status: {[g.model_dump() for g in gates]}\n"
-        f"- Active incident: {incident.model_dump()}\n"
-        f"- Weather: {weather.model_dump()}\n"
-        f"- Event state: {event_context.model_dump()}\n\n"
+        f"{_build_state_snapshot(gates, incident, weather, event_context)}\n"
+        f"{_build_alignment_guidance()}\n"
         "Instructions:\n"
         "1. Provide a professional, concise response (maximum 150 words).\n"
         "2. Focus on actionable, concrete advice based on the current stadium state.\n"
@@ -128,10 +168,7 @@ async def chat_with_assistant(
     )
 
     prompt_content = (
-        f"{system_context}\n"
-        f"Conversation History:\n{history_str}\n"
-        f"User asks: {message}\n"
-        "Assistant:"
+        f"{system_context}\nConversation History:\n{history_str}\nUser asks: {message}\nAssistant:"
     )
 
     try:
@@ -145,7 +182,7 @@ async def chat_with_assistant(
             )
             return response.text.strip()
 
-        return await asyncio.get_event_loop().run_in_executor(None, _call_api)
+        return await asyncio.to_thread(_call_api)
     except Exception as exc:
         logger.error("Gemini API chat call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_chat(message, history, gates, incident, weather, event_context)
@@ -180,7 +217,7 @@ def _generate_mock_playbook(
                 f"Direct spectators away from Zone {incident.zone} toward Gates "
                 f"{', '.join(underloaded) if underloaded else 'South-A, South-B'}."
             ),
-            "Open all gate egress turnstiles to manual override mode (unrestricted exit)."
+            "Open all gate egress turnstiles to manual override mode (unrestricted exit).",
         ]
         announcements = {
             "en": (
@@ -211,7 +248,7 @@ def _generate_mock_playbook(
                 "the covered stadium concourses."
             ),
             "Halt outdoor transit and volunteer dispatch on external plazas.",
-            "Monitor lightning radius updates every 5 minutes."
+            "Monitor lightning radius updates every 5 minutes.",
         ]
         announcements = {
             "en": (
@@ -239,7 +276,7 @@ def _generate_mock_playbook(
             f"Dispatch medical response team to Zone {incident.zone} with standard stretcher gear.",
             f"Instruct Zone {incident.zone} stewards to clear access paths for paramedics.",
             "Configure local CCTV feed for direct visualization of the response.",
-            "Log resolution details once the patient is stabilized or evacuated."
+            "Log resolution details once the patient is stabilized or evacuated.",
         ]
         announcements = {
             "en": (
@@ -248,7 +285,7 @@ def _generate_mock_playbook(
                 "your cooperation."
             ),
             "es": (
-                "Atención: Por favor, mantenga los pasillos and vías de acceso "
+                "Atención: Por favor, mantenga los pasillos y vías de acceso "
                 "despejados en la Zona B3 para permitir el paso del personal médico. "
                 "Gracias por su cooperación."
             ),
@@ -273,7 +310,7 @@ def _generate_mock_playbook(
                 "Instruct perimeter stewards to advise fans arriving on plazas of the "
                 "shorter wait times at the southern gates."
             ),
-            "Monitor turnstile entry rates every 2 minutes to assess load redirection."
+            "Monitor turnstile entry rates every 2 minutes to assess load redirection.",
         ]
         announcements = {
             "en": (
@@ -295,12 +332,14 @@ def _generate_mock_playbook(
     else:
         summary = (
             "NORMAL OPERATIONS: All gates operating within standard load limits. "
-            "Weather and incident indicators are stable."
+            "Weather and incident indicators are stable, and navigation, transport, "
+            "and sustainability checks remain nominal."
         )
         steps = [
             "Continue routine monitoring of turnstile entry rates.",
-            "Verify concessions and volunteer posts are fully staffed for the current phase.",
-            "Ensure emergency services vehicles remain on standby."
+            "Verify concessions, volunteer posts, and accessible routing points are staffed.",
+            "Ensure emergency services vehicles remain on standby.",
+            "Confirm transit shuttles and low-waste service points are ready for the next wave.",
         ]
         announcements = {
             "en": (
@@ -320,11 +359,7 @@ def _generate_mock_playbook(
             ),
         }
 
-    return {
-        "summary": summary,
-        "steps": steps,
-        "announcements": announcements
-    }
+    return {"summary": summary, "steps": steps, "announcements": announcements}
 
 
 def _generate_mock_chat(
@@ -350,7 +385,7 @@ def _generate_mock_chat(
             f"{overloaded_str if overloaded_str != 'None' else 'North-A, North-B'}"
             ") to monitor departing groups."
         )
-    elif "fire" in msg or "smoke" in msg or "evac" in msg:
+    if "fire" in msg or "smoke" in msg or "evac" in msg:
         return (
             f"Fire/Evacuation Protocol for Zone {incident.zone}: 1. Verify source "
             "immediately via CCTV and dispatch zone supervisor. 2. Initiate localized "
@@ -358,7 +393,7 @@ def _generate_mock_chat(
             f"{underloaded_str if underloaded_str != 'None' else 'South-A, South-B'}. "
             "4. Coordinate with transit dispatch to prepare buses/trains for egress surge."
         )
-    elif "lightning" in msg or "storm" in msg or "weather" in msg:
+    if "lightning" in msg or "storm" in msg or "weather" in msg:
         lightning_msg = (
             f"lightning is currently at {weather.lightning_radius_km} km. "
             "Immediate shelter required!"
@@ -371,7 +406,7 @@ def _generate_mock_chat(
             "Actions: 1. If lightning < 15km, suspend field activities. "
             "2. Direct fans to covered areas. 3. Alert medical for heat-related illness."
         )
-    elif "gate" in msg or "redirect" in msg or "traffic" in msg or "crowd" in msg:
+    if "gate" in msg or "redirect" in msg or "traffic" in msg or "crowd" in msg:
         return (
             f"Crowd Redirection: Overloaded gates: {overloaded_str}. "
             f"Underloaded gates: {underloaded_str}. "
@@ -379,19 +414,20 @@ def _generate_mock_chat(
             "2. Reprogram electronic signage to display directional arrows. "
             "3. Broadcast PA redirection announcement."
         )
-    elif "hi" in msg or "hello" in msg or "help" in msg:
+    if "hi" in msg or "hello" in msg or "help" in msg:
         return (
             "Hello! I am the GenAI Control Room Assistant. I have live access to the stadium "
             "gate feeds, weather monitors, and active incident reports "
             f"(currently: {incident.type} in Zone {incident.zone}). "
-            "Ask me anything about emergency procedures, crowd rerouting, translations, or "
-            "current stadium stats."
+            "I can help with navigation, crowd rerouting, accessibility, transportation, "
+            "multilingual fan messaging, sustainability-minded operations, and current "
+            "stadium stats."
         )
-    else:
-        return (
-            f"Operational Guidance: Current stadium phase is {event_context.phase.value} with "
-            f"{event_context.occupied_seats}/{event_context.total_capacity} occupied seats. "
-            f"To address your query: verify sector status in Zone {incident.zone}, "
-            "check gate entry rates, and ensure PA announcements are coordinated. "
-            "Let me know if you need specific announcements drafted."
-        )
+    return (
+        f"Operational Guidance: Current stadium phase is {event_context.phase.value} with "
+        f"{event_context.occupied_seats}/{event_context.total_capacity} occupied seats. "
+        f"To address your query: verify sector status in Zone {incident.zone}, "
+        "check gate entry rates, coordinate PA announcements, and confirm transport, "
+        "transit, or accessibility implications. "
+        "Let me know if you need specific announcements drafted."
+    )

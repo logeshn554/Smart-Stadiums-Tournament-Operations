@@ -11,10 +11,10 @@
 
     // ── Configuration ────────────────────────────────────────────────────
 
-    var API_BASE_URL = (window.location.hostname === "localhost" || 
-                        window.location.hostname === "127.0.0.1" || 
-                        window.location.protocol === "file:") 
-                        ? "http://127.0.0.1:8000" 
+    var API_BASE_URL = (window.location.hostname === "localhost" ||
+                        window.location.hostname === "127.0.0.1" ||
+                        window.location.protocol === "file:")
+                        ? "http://127.0.0.1:8000"
                         : "https://smart-stadiums-tournament-operations-xz6g.onrender.com";
     var AUTO_REFRESH_INTERVAL_MS = 30000;
     var DEBOUNCE_MS = 300;
@@ -102,6 +102,55 @@
         return JSON.stringify(payload);
     }
 
+    /**
+     * Update an element's textContent if it exists.
+     * @param {string} id - Element ID.
+     * @param {string} value - Text to render.
+     */
+    function setTextContentById(id, value) {
+        var element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    /**
+     * Process a fetch response and normalize common HTTP error handling.
+     * @param {Response} response - Fetch response object.
+     * @param {Object<number, Function>} statusHandlers - Optional per-status handlers.
+     * @param {string} defaultErrorPrefix - Prefix used for unexpected HTTP errors.
+     * @returns {Promise<Object>} Parsed JSON body.
+     */
+    function handleJsonResponse(response, statusHandlers, defaultErrorPrefix) {
+        var handler = statusHandlers && statusHandlers[response.status];
+        if (handler) {
+            return handler(response);
+        }
+
+        if (!response.ok) {
+            throw new Error((defaultErrorPrefix || "Server error: ") + response.status);
+        }
+
+        return response.json();
+    }
+
+    /**
+     * Convert the configured API base URL into a matching WebSocket URL.
+     * @param {string} baseUrl - HTTP(S) base URL.
+     * @returns {string} WebSocket endpoint URL.
+     */
+    function buildWebSocketUrl(baseUrl) {
+        if (baseUrl.startsWith("http://")) {
+            return baseUrl.replace("http://", "ws://") + "/api/ws";
+        }
+
+        if (baseUrl.startsWith("https://")) {
+            return baseUrl.replace("https://", "wss://") + "/api/ws";
+        }
+
+        return "ws://127.0.0.1:8000/api/ws";
+    }
+
     // ── Client-Side Form Validation ──────────────────────────────────────
 
     /**
@@ -117,6 +166,7 @@
 
         if (!field.value || field.value.trim() === "") {
             field.classList.add("invalid");
+            field.setAttribute("aria-invalid", "true");
             errorEl.textContent = message;
             errorEl.classList.add("visible");
             return false;
@@ -129,6 +179,7 @@
             var max = field.max !== "" ? parseFloat(field.max) : Infinity;
             if (isNaN(val) || val < min || val > max) {
                 field.classList.add("invalid");
+                field.setAttribute("aria-invalid", "true");
                 errorEl.textContent = "Value must be between " + min + " and " + max + ".";
                 errorEl.classList.add("visible");
                 return false;
@@ -136,6 +187,7 @@
         }
 
         field.classList.remove("invalid");
+        field.setAttribute("aria-invalid", "false");
         errorEl.textContent = "";
         errorEl.classList.remove("visible");
         return true;
@@ -193,6 +245,7 @@
         var invalidEls = document.querySelectorAll(".invalid");
         for (var j = 0; j < invalidEls.length; j++) {
             invalidEls[j].classList.remove("invalid");
+            invalidEls[j].setAttribute("aria-invalid", "false");
         }
     }
 
@@ -404,18 +457,16 @@
             body: JSON.stringify(payload),
         })
         .then(function (response) {
-            if (response.status === 403) {
-                throw new Error("Access denied: viewers cannot submit Critical-level incidents.");
-            }
-            if (response.status === 422) {
-                return response.json().then(function (data) {
-                    throw new Error("Validation error: " + JSON.stringify(data.detail));
-                });
-            }
-            if (!response.ok) {
-                throw new Error("Server error: " + response.status);
-            }
-            return response.json();
+            return handleJsonResponse(response, {
+                403: function () {
+                    throw new Error("Access denied: viewers cannot submit Critical-level incidents.");
+                },
+                422: function (validationResponse) {
+                    return validationResponse.json().then(function (data) {
+                        throw new Error("Validation error: " + JSON.stringify(data.detail));
+                    });
+                }
+            }, "Server error: ");
         })
         .then(function (data) {
             renderRecommendations(data.recommendations);
@@ -525,6 +576,7 @@
         var field = event.target;
         if (field.classList.contains("invalid")) {
             field.classList.remove("invalid");
+            field.setAttribute("aria-invalid", "false");
             var errorId = field.id + "-error";
             var errorEl = document.getElementById(errorId);
             if (errorEl) {
@@ -592,13 +644,10 @@
             body: JSON.stringify(payload)
         })
         .then(function (response) {
-            if (!response.ok) {
-                throw new Error("GenAI Playbook synthesis failed: status " + response.status);
-            }
-            return response.json();
+            return handleJsonResponse(response, null, "GenAI Playbook synthesis failed: status ");
         })
         .then(function (data) {
-            document.getElementById("playbook-summary").textContent = data.summary;
+            setTextContentById("playbook-summary", data.summary);
 
             var stepsList = document.getElementById("playbook-steps");
             stepsList.innerHTML = "";
@@ -610,9 +659,9 @@
                 });
             }
 
-            document.getElementById("announcement-en").textContent = data.announcements.en || "";
-            document.getElementById("announcement-es").textContent = data.announcements.es || "";
-            document.getElementById("announcement-fr").textContent = data.announcements.fr || "";
+            setTextContentById("announcement-en", data.announcements.en || "");
+            setTextContentById("announcement-es", data.announcements.es || "");
+            setTextContentById("announcement-fr", data.announcements.fr || "");
 
             playbookEmptyState.classList.add("hidden");
             playbookContent.classList.remove("hidden");
@@ -876,7 +925,7 @@
             .then(function (permission) {
                 if (permission === "granted") {
                     console.log("[StadiumOps AI] Notification permission granted.");
-                    
+
                     // Register SW explicitly so it uses correct file location
                     navigator.serviceWorker.register("firebase-messaging-sw.js")
                         .then(function (registration) {
@@ -966,16 +1015,7 @@
 
     var ws = null;
     function connectWebSocket() {
-        var wsUrl;
-        if (API_BASE_URL.startsWith("http://")) {
-            wsUrl = API_BASE_URL.replace("http://", "ws://") + "/api/ws";
-        } else if (API_BASE_URL.startsWith("https://")) {
-            wsUrl = API_BASE_URL.replace("https://", "wss://") + "/api/ws";
-        } else {
-            wsUrl = "ws://127.0.0.1:8000/api/ws";
-        }
-
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(buildWebSocketUrl(API_BASE_URL));
 
         ws.onopen = function () {
             console.log("[StadiumOps AI] WebSocket connected");

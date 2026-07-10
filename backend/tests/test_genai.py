@@ -4,9 +4,6 @@ Validates GenAI playbook generation, chat assistant responses, fallback mock gen
 API endpoints, rate limiting, and header authentication.
 """
 
-from typing import Never
-
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -71,8 +68,18 @@ def _valid_event() -> EventContext:
 def _valid_payload() -> dict:
     return {
         "gates": [
-            {"gate_id": "North-A", "capacity_percent": 85.0, "entry_rate": 45, "wait_time_seconds": 340},
-            {"gate_id": "South-A", "capacity_percent": 25.0, "entry_rate": 8, "wait_time_seconds": 45},
+            {
+                "gate_id": "North-A",
+                "capacity_percent": 85.0,
+                "entry_rate": 45,
+                "wait_time_seconds": 340,
+            },
+            {
+                "gate_id": "South-A",
+                "capacity_percent": 25.0,
+                "entry_rate": 8,
+                "wait_time_seconds": 45,
+            },
         ],
         "incident": {
             "incident_id": "INC-100",
@@ -150,13 +157,17 @@ class TestGenAICoreMockFallback:
 
     @pytest.mark.anyio
     async def test_mock_playbook_default(self) -> None:
-        gates = [GateStatus(gate_id="G1", capacity_percent=50, entry_rate=20, wait_time_seconds=100)]
+        gates = [
+            GateStatus(gate_id="G1", capacity_percent=50, entry_rate=20, wait_time_seconds=100)
+        ]
         incident = _valid_incident("security")
         weather = _valid_weather()
         event = _valid_event()
 
         res = await generate_briefing_and_playbook(gates, incident, weather, event, api_key=None)
         assert "NORMAL OPERATIONS" in res["summary"]
+        assert "navigation" in res["summary"].lower()
+        assert len(res["steps"]) >= 4
 
     @pytest.mark.anyio
     async def test_mock_chat_scenarios(self) -> None:
@@ -166,7 +177,9 @@ class TestGenAICoreMockFallback:
         event = _valid_event()
 
         # Lost child
-        reply = await chat_with_assistant("Draft alert for lost child", [], gates, incident, weather, event, None)
+        reply = await chat_with_assistant(
+            "Draft alert for lost child", [], gates, incident, weather, event, None
+        )
         assert "Lost Child Protocol" in reply
 
         # Fire
@@ -174,20 +187,28 @@ class TestGenAICoreMockFallback:
         assert "Fire/Evacuation Protocol" in reply
 
         # Lightning
-        reply = await chat_with_assistant("What is the weather warning?", [], gates, incident, weather, event, None)
+        reply = await chat_with_assistant(
+            "What is the weather warning?", [], gates, incident, weather, event, None
+        )
         assert "Weather Protocol" in reply
 
         # Gate redirection
-        reply = await chat_with_assistant("How are gate lines?", [], gates, incident, weather, event, None)
+        reply = await chat_with_assistant(
+            "How are gate lines?", [], gates, incident, weather, event, None
+        )
         assert "Crowd Redirection" in reply
 
         # Greetings
         reply = await chat_with_assistant("hello", [], gates, incident, weather, event, None)
         assert "GenAI Control Room Assistant" in reply
+        assert "sustainability" in reply.lower()
 
         # Default
-        reply = await chat_with_assistant("What is our capacity?", [], gates, incident, weather, event, None)
+        reply = await chat_with_assistant(
+            "What is our capacity?", [], gates, incident, weather, event, None
+        )
         assert "Operational Guidance" in reply
+        assert "transport" in reply.lower()
 
 
 class TestGenAIEndpoints:
@@ -223,7 +244,9 @@ class TestGenAIEndpoints:
         # Trigger RATE_LIMIT_MAX allowed requests
         for i in range(RATE_LIMIT_MAX):
             response = client.post("/api/genai/playbook", json=_valid_payload())
-            assert response.status_code == 200, f"Request {i+1} failed with {response.status_code}"
+            assert response.status_code == 200, (
+                f"Request {i + 1} failed with {response.status_code}"
+            )
         # Next request should be blocked with 429
         response = client.post("/api/genai/playbook", json=_valid_payload())
         assert response.status_code == 429
@@ -256,6 +279,7 @@ class TestGenAIHTTPCalls:
         event = _valid_event()
 
         from unittest.mock import MagicMock
+
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = '{"summary": "Gemini briefing", "steps": ["Gemini Step 1"], "announcements": {"en": "Gemini hello", "es": "Gemini hola", "fr": "Gemini bonjour"}}'
@@ -263,7 +287,9 @@ class TestGenAIHTTPCalls:
 
         monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
-        res = await generate_briefing_and_playbook(gates, incident, weather, event, api_key="secret-gemini-key")
+        res = await generate_briefing_and_playbook(
+            gates, incident, weather, event, api_key="secret-gemini-key"
+        )
         assert res["summary"] == "Gemini briefing"
         assert res["steps"] == ["Gemini Step 1"]
         assert res["announcements"]["es"] == "Gemini hola"
@@ -276,6 +302,7 @@ class TestGenAIHTTPCalls:
         event = _valid_event()
 
         from unittest.mock import MagicMock
+
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = "Gemini response to question"
@@ -283,7 +310,15 @@ class TestGenAIHTTPCalls:
 
         monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
-        res = await chat_with_assistant("Explain lightning protocol", [], gates, incident, weather, event, api_key="secret-gemini-key")
+        res = await chat_with_assistant(
+            "Explain lightning protocol",
+            [],
+            gates,
+            incident,
+            weather,
+            event,
+            api_key="secret-gemini-key",
+        )
         assert res == "Gemini response to question"
 
     @pytest.mark.anyio
@@ -294,12 +329,14 @@ class TestGenAIHTTPCalls:
         event = _valid_event()
 
         from unittest.mock import MagicMock
+
         mock_client = MagicMock()
         mock_client.models.generate_content.side_effect = Exception("API Error")
 
         monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
         # Should fall back to mock without raising exception
-        res = await generate_briefing_and_playbook(gates, incident, weather, event, api_key="secret-gemini-key")
+        res = await generate_briefing_and_playbook(
+            gates, incident, weather, event, api_key="secret-gemini-key"
+        )
         assert "HIGH INCIDENT ALERT" in res["summary"]
-

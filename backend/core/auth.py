@@ -55,10 +55,14 @@ def _generate_rsa_keypair() -> tuple[str, str]:
         encryption_algorithm=serialization.NoEncryption(),
     ).decode("utf-8")
 
-    public_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode("utf-8")
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
 
     os.makedirs(_KEYS_DIR, exist_ok=True)
     with open(_PRIVATE_KEY_PATH, "w", encoding="utf-8") as f:

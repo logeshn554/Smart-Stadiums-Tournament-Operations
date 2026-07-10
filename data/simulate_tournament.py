@@ -28,10 +28,30 @@ VENUES = {
     "Northern Arena": {
         "venue_id": "Northern-Arena",
         "gates": [
-            {"gate_id": "Gate-A", "capacity_percent": 95.0, "entry_rate": 0, "wait_time_seconds": 600},
-            {"gate_id": "Gate-B", "capacity_percent": 88.0, "entry_rate": 0, "wait_time_seconds": 540},
-            {"gate_id": "Gate-C", "capacity_percent": 30.0, "entry_rate": 0, "wait_time_seconds": 60},
-            {"gate_id": "Gate-D", "capacity_percent": 20.0, "entry_rate": 0, "wait_time_seconds": 40},
+            {
+                "gate_id": "Gate-A",
+                "capacity_percent": 95.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 600,
+            },
+            {
+                "gate_id": "Gate-B",
+                "capacity_percent": 88.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 540,
+            },
+            {
+                "gate_id": "Gate-C",
+                "capacity_percent": 30.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 60,
+            },
+            {
+                "gate_id": "Gate-D",
+                "capacity_percent": 20.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 40,
+            },
         ],
         "incident": {
             "incident_id": "INC-NORTH-01",
@@ -58,10 +78,30 @@ VENUES = {
     "Southern Stadium": {
         "venue_id": "Southern-Stadium",
         "gates": [
-            {"gate_id": "Gate-1", "capacity_percent": 45.0, "entry_rate": 20, "wait_time_seconds": 90},
-            {"gate_id": "Gate-2", "capacity_percent": 50.0, "entry_rate": 22, "wait_time_seconds": 100},
-            {"gate_id": "Gate-3", "capacity_percent": 40.0, "entry_rate": 15, "wait_time_seconds": 80},
-            {"gate_id": "Gate-4", "capacity_percent": 35.0, "entry_rate": 10, "wait_time_seconds": 60},
+            {
+                "gate_id": "Gate-1",
+                "capacity_percent": 45.0,
+                "entry_rate": 20,
+                "wait_time_seconds": 90,
+            },
+            {
+                "gate_id": "Gate-2",
+                "capacity_percent": 50.0,
+                "entry_rate": 22,
+                "wait_time_seconds": 100,
+            },
+            {
+                "gate_id": "Gate-3",
+                "capacity_percent": 40.0,
+                "entry_rate": 15,
+                "wait_time_seconds": 80,
+            },
+            {
+                "gate_id": "Gate-4",
+                "capacity_percent": 35.0,
+                "entry_rate": 10,
+                "wait_time_seconds": 60,
+            },
         ],
         "incident": {
             "incident_id": "INC-SOUTH-02",
@@ -88,10 +128,30 @@ VENUES = {
     "Eastern Complex": {
         "venue_id": "Eastern-Complex",
         "gates": [
-            {"gate_id": "North-Exit", "capacity_percent": 85.0, "entry_rate": 0, "wait_time_seconds": 300},
-            {"gate_id": "South-Exit", "capacity_percent": 90.0, "entry_rate": 0, "wait_time_seconds": 350},
-            {"gate_id": "East-Exit", "capacity_percent": 35.0, "entry_rate": 0, "wait_time_seconds": 50},
-            {"gate_id": "West-Exit", "capacity_percent": 15.0, "entry_rate": 0, "wait_time_seconds": 20},
+            {
+                "gate_id": "North-Exit",
+                "capacity_percent": 85.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 300,
+            },
+            {
+                "gate_id": "South-Exit",
+                "capacity_percent": 90.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 350,
+            },
+            {
+                "gate_id": "East-Exit",
+                "capacity_percent": 35.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 50,
+            },
+            {
+                "gate_id": "West-Exit",
+                "capacity_percent": 15.0,
+                "entry_rate": 0,
+                "wait_time_seconds": 20,
+            },
         ],
         "incident": {
             "incident_id": "INC-EAST-03",
@@ -142,7 +202,11 @@ async def simulate_venue(name, client, payload):
             recs.extend(weather_action(req.weather))
             recs.extend(accessibility_routing(req.event_context, req.incident))
             recs.extend(egress_plan(req.event_context, req.gates))
-            recs.sort(key=lambda r: {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}.get(r.severity.value, 99))
+            recs.sort(
+                key=lambda r: {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}.get(
+                    r.severity.value, 99
+                )
+            )
             return name, [r.model_dump() for r in recs], f"Fallback engine (API offline: {exc})"
         except Exception as local_exc:
             return name, [], f"Local evaluation failed: {local_exc}"
@@ -184,7 +248,9 @@ async def run_tournament():
     print(f"Total Live Alerts Generated: {total_recommendations}")
 
     # Regional Transit Alert Coordination
-    egress_stadiums = [name for name, recs, _ in results if any(r["rule_id"] == "egress_plan" for r in recs)]
+    egress_stadiums = [
+        name for name, recs, _ in results if any(r["rule_id"] == "egress_plan" for r in recs)
+    ]
     if egress_stadiums:
         print(
             f"\n[TRANSIT COORDINATION ALERT]: Overlapping egress patterns detected at: {', '.join(egress_stadiums)}."
@@ -192,9 +258,13 @@ async def run_tournament():
         print("  Recommendation: Alert regional transit dispatch to scale up train/bus services.")
 
     # Weather Coordination
-    lightning_stadiums = [name for name, _, _ in results if VENUES[name]["weather"]["lightning_detected"]]
+    lightning_stadiums = [
+        name for name, _, _ in results if VENUES[name]["weather"]["lightning_detected"]
+    ]
     if lightning_stadiums:
-        print(f"\n[WEATHER INCIDENT WARNING]: Severe lightning front active over: {', '.join(lightning_stadiums)}.")
+        print(
+            f"\n[WEATHER INCIDENT WARNING]: Severe lightning front active over: {', '.join(lightning_stadiums)}."
+        )
         print("  Recommendation: Suspend outdoor volunteer shifts across this zone.")
 
     print("\nTournament Operations status checks complete.")

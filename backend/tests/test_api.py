@@ -27,7 +27,12 @@ client = TestClient(app)
 VALID_PAYLOAD = {
     "venue_id": "stadium-1",
     "gates": [
-        {"gate_id": "North-A", "capacity_percent": 85.0, "entry_rate": 40, "wait_time_seconds": 300},
+        {
+            "gate_id": "North-A",
+            "capacity_percent": 85.0,
+            "entry_rate": 40,
+            "wait_time_seconds": 300,
+        },
         {"gate_id": "South-A", "capacity_percent": 20.0, "entry_rate": 5, "wait_time_seconds": 60},
     ],
     "incident": {
@@ -165,7 +170,7 @@ def test_analyze_html_sanitization() -> None:
     res = client.post("/api/analyze", json=payload)
     assert res.status_code == 200
     recs = res.json()["recommendations"]
-    triage_rec = [r for r in recs if r["rule_id"] == "triage_incident"][0]
+    triage_rec = next(r for r in recs if r["rule_id"] == "triage_incident")
     assert "<script>" not in triage_rec["reason"]
     assert "alert('XSS')" in triage_rec["reason"]
 
@@ -272,10 +277,9 @@ def test_incident_triage_sanitization() -> None:
     res = client.post("/api/incident", json=inc)
     assert res.status_code == 200
     recs = res.json()["recommendations"]
-    triage_rec = [r for r in recs if r["rule_id"] == "triage_incident"][0]
+    triage_rec = next(r for r in recs if r["rule_id"] == "triage_incident")
     assert "Fight active here" in triage_rec["reason"]
     assert "<b>" not in triage_rec["reason"]
-
 
 
 def test_incident_triage_audit_logged() -> None:
@@ -429,6 +433,7 @@ def test_websocket_disconnect_cleanup() -> None:
     """Test 26: Gracefully cleans connections list when clients disconnect."""
     # Ensure connections list is tracked
     from backend.api.routes import _ws_connections
+
     initial_len = len(_ws_connections)
 
     with client.websocket_connect("/api/ws"):
@@ -445,11 +450,14 @@ def test_websocket_disconnect_cleanup() -> None:
 
 def test_cors_headers() -> None:
     """Test 27: CORS headers allow access to localhost origins."""
-    res = client.options("/api/health", headers={
-        "Origin": "http://localhost:8080",
-        "Access-Control-Request-Method": "GET",
-        "Access-Control-Request-Headers": "Content-Type",
-    })
+    res = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:8080",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
     assert res.headers.get("access-control-allow-origin") == "http://localhost:8080"
 
 
@@ -472,7 +480,7 @@ def test_gzip_compression_active() -> None:
     res = client.post(
         "/api/analyze",
         json=large_payload,
-        headers={"Accept-Encoding": "gzip", "Authorization": f"Bearer {token}"}
+        headers={"Accept-Encoding": "gzip", "Authorization": f"Bearer {token}"},
     )
     assert res.headers.get("content-encoding") == "gzip"
 
@@ -498,10 +506,12 @@ def test_extra_claims_and_keypair_generation() -> None:
     temp_dir = tempfile.mkdtemp()
     try:
         from backend.core import auth
-        with patch("backend.core.auth._KEYS_DIR", temp_dir), \
-             patch("backend.core.auth._PRIVATE_KEY_PATH", os.path.join(temp_dir, "private.pem")), \
-             patch("backend.core.auth._PUBLIC_KEY_PATH", os.path.join(temp_dir, "public.pem")):
 
+        with (
+            patch("backend.core.auth._KEYS_DIR", temp_dir),
+            patch("backend.core.auth._PRIVATE_KEY_PATH", os.path.join(temp_dir, "private.pem")),
+            patch("backend.core.auth._PUBLIC_KEY_PATH", os.path.join(temp_dir, "public.pem")),
+        ):
             # Call _load_keys directly on an empty directory will generate new keys internally (covers line 91)
             priv, pub = auth._load_keys()
             assert "BEGIN PRIVATE KEY" in priv
@@ -520,8 +530,9 @@ def test_extra_claims_and_keypair_generation() -> None:
 @pytest.mark.asyncio
 async def test_genai_real_api_mocked() -> None:
     """Test 31: Test real Gemini API paths under mocked google-genai response."""
+    from unittest.mock import MagicMock, patch
+
     from backend.core.genai import chat_with_assistant, generate_briefing_and_playbook
-    from unittest.mock import patch, MagicMock
 
     mock_playbook_response = MagicMock()
     mock_playbook_response.text = '{"summary": "Test summary from Gemini", "steps": ["Mock step 1"], "announcements": {"en": "EN", "es": "ES", "fr": "FR"}}'
@@ -538,27 +549,55 @@ async def test_genai_real_api_mocked() -> None:
 
         # Test direct playbook generation function
         from backend.models.schemas import EventContext, GateStatus, IncidentReport, WeatherContext
-        gates = [GateStatus(gate_id="G1", capacity_percent=50.0, entry_rate=10, wait_time_seconds=60)]
-        incident = IncidentReport(incident_id="INC-1", zone="B1", type="medical", description="heat collapse", reporter_role="steward")
-        weather = WeatherContext(temperature_celsius=30, heat_index=32, lightning_detected=False, lightning_radius_km=0)
-        event_ctx = EventContext(phase="halftime", total_capacity=50000, occupied_seats=30000, accessible_seats_available=10, concession_queue_avg_minutes=5)
 
-        playbook = await generate_briefing_and_playbook(gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
+        gates = [
+            GateStatus(gate_id="G1", capacity_percent=50.0, entry_rate=10, wait_time_seconds=60)
+        ]
+        incident = IncidentReport(
+            incident_id="INC-1",
+            zone="B1",
+            type="medical",
+            description="heat collapse",
+            reporter_role="steward",
+        )
+        weather = WeatherContext(
+            temperature_celsius=30, heat_index=32, lightning_detected=False, lightning_radius_km=0
+        )
+        event_ctx = EventContext(
+            phase="halftime",
+            total_capacity=50000,
+            occupied_seats=30000,
+            accessible_seats_available=10,
+            concession_queue_avg_minutes=5,
+        )
+
+        playbook = await generate_briefing_and_playbook(
+            gates, incident, weather, event_ctx, api_key="TEST_API_KEY"
+        )
         assert playbook["summary"] == "Test summary from Gemini"
 
         # Test Chat function
         mock_client.models.generate_content.return_value = mock_chat_response
-        chat_reply = await chat_with_assistant("Hello", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
+        chat_reply = await chat_with_assistant(
+            "Hello", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY"
+        )
         assert chat_reply == "Gemini interactive assistant reply."
 
         # 2. Test failure handling in API call (should fallback to mock playbook)
         mock_client.models.generate_content.side_effect = Exception("API Error")
-        playbook_fallback = await generate_briefing_and_playbook(gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
-        assert "NORMAL OPERATIONS" in playbook_fallback["summary"] or "HIGH INCIDENT" in playbook_fallback["summary"] or "OPERATIONAL BOTTLENECK" in playbook_fallback["summary"]
+        playbook_fallback = await generate_briefing_and_playbook(
+            gates, incident, weather, event_ctx, api_key="TEST_API_KEY"
+        )
+        assert (
+            "NORMAL OPERATIONS" in playbook_fallback["summary"]
+            or "HIGH INCIDENT" in playbook_fallback["summary"]
+            or "OPERATIONAL BOTTLENECK" in playbook_fallback["summary"]
+        )
 
-        chat_fallback = await chat_with_assistant("xyz", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
+        chat_fallback = await chat_with_assistant(
+            "xyz", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY"
+        )
         assert "Operational Guidance" in chat_fallback
-
 
 
 def test_invalid_authorization_formats_and_exceptions() -> None:
@@ -566,7 +605,12 @@ def test_invalid_authorization_formats_and_exceptions() -> None:
     clean_payload = {
         "venue_id": "stadium-1",
         "gates": [
-            {"gate_id": "North-A", "capacity_percent": 85.0, "entry_rate": 40, "wait_time_seconds": 300},
+            {
+                "gate_id": "North-A",
+                "capacity_percent": 85.0,
+                "entry_rate": 40,
+                "wait_time_seconds": 300,
+            },
         ],
         "incident": {
             "incident_id": "INC-100",
@@ -596,7 +640,9 @@ def test_invalid_authorization_formats_and_exceptions() -> None:
     assert "Invalid authorization header format" in res.json()["detail"]
 
     # Invalid Token signature/expiry exception triggering verification error
-    res = client.post("/api/analyze", json=clean_payload, headers={"Authorization": "Bearer invalid.token.value"})
+    res = client.post(
+        "/api/analyze", json=clean_payload, headers={"Authorization": "Bearer invalid.token.value"}
+    )
     assert res.status_code == 401
     assert "Invalid or expired token" in res.json()["detail"]
 
@@ -641,9 +687,10 @@ def test_redis_init_paths() -> None:
     from backend.api import routes
 
     # 1. Force reload of routes with REDIS_URL set to local mock
-    with patch("os.getenv", return_value="redis://mock-redis-host:6379"), \
-         patch("redis.from_url") as mock_from_url:
-
+    with (
+        patch("os.getenv", return_value="redis://mock-redis-host:6379"),
+        patch("redis.from_url") as mock_from_url,
+    ):
         mock_client = MagicMock()
         mock_client.ping = MagicMock(return_value=True)
         mock_from_url.return_value = mock_client
@@ -652,9 +699,10 @@ def test_redis_init_paths() -> None:
         assert routes._redis_client is not None
 
     # 2. Force reload with REDIS_URL but ping fails
-    with patch("os.getenv", return_value="redis://mock-redis-host:6379"), \
-         patch("redis.from_url", side_effect=Exception("Connection refused")):
-
+    with (
+        patch("os.getenv", return_value="redis://mock-redis-host:6379"),
+        patch("redis.from_url", side_effect=Exception("Connection refused")),
+    ):
         importlib.reload(routes)
         assert routes._redis_client is None
 
@@ -665,6 +713,7 @@ def test_redis_init_paths() -> None:
 def test_direct_sanitize_description() -> None:
     """Test 35: Direct call to _sanitize_description with HTML tags to cover logger line."""
     from backend.api.routes import _sanitize_description
+
     result = _sanitize_description("<p>Test</p> text")
     assert result == "Test text"
 
@@ -673,12 +722,20 @@ def test_audit_log_sqlite_exception_fallback() -> None:
     """Test 36: Test SQLite exception path in _append_audit_entry falling back to in-memory log."""
     from backend.api import routes
 
-    with patch("backend.api.routes._sqlite_enabled", True), \
-         patch("sqlite3.connect", side_effect=Exception("Database locked")):
-
+    with (
+        patch("backend.api.routes._sqlite_enabled", True),
+        patch("sqlite3.connect", side_effect=Exception("Database locked")),
+    ):
         from backend.models.schemas import IncidentReport
+
         for i in range(110):
-            inc = IncidentReport(incident_id=f"INC-EXC-{i}", zone="A", type="medical", description="test desc", reporter_role="steward")
+            inc = IncidentReport(
+                incident_id=f"INC-EXC-{i}",
+                zone="A",
+                type="medical",
+                description="test desc",
+                reporter_role="steward",
+            )
             routes._append_audit_entry("test-venue-fallback", inc, "test")
 
         assert len(routes._audit_log["test-venue-fallback"]) == 100
@@ -696,7 +753,15 @@ async def test_ws_broadcast_exception() -> None:
     routes._ws_connections.append(mock_ws)
 
     from backend.models.schemas import ConfidenceLevel, Recommendation, SeverityLevel
-    rec = Recommendation(rule_id="test", severity=SeverityLevel.LOW, action="Action", reason="Reason", affected_zone="Zone", confidence=ConfidenceLevel.ADVISORY)
+
+    rec = Recommendation(
+        rule_id="test",
+        severity=SeverityLevel.LOW,
+        action="Action",
+        reason="Reason",
+        affected_zone="Zone",
+        confidence=ConfidenceLevel.ADVISORY,
+    )
 
     await routes._broadcast_ws([rec])
     assert mock_ws not in routes._ws_connections
@@ -704,9 +769,10 @@ async def test_ws_broadcast_exception() -> None:
 
 def test_audit_endpoint_sqlite_exception_fallback() -> None:
     """Test 38: Test SQLite exception path in audit_endpoint falling back to in-memory log."""
-    with patch("backend.api.routes._sqlite_enabled", True), \
-         patch("sqlite3.connect", side_effect=Exception("Database corrupt")):
-
+    with (
+        patch("backend.api.routes._sqlite_enabled", True),
+        patch("sqlite3.connect", side_effect=Exception("Database corrupt")),
+    ):
         res = client.get("/api/audit?venue_id=default")
         assert res.status_code == 200
         assert "total_entries" in res.json()
@@ -725,14 +791,19 @@ def test_websocket_endpoint_general_exception() -> None:
 def test_frontend_index_path_not_exists() -> None:
     """Test 40: Test frontend parsed_html fixture raises error when path doesn't exist."""
     from backend.tests.test_frontend import parsed_html
+
     func = getattr(parsed_html, "__wrapped__", parsed_html)
-    with patch("os.path.exists", return_value=False), pytest.raises(BaseException):
+    with (
+        patch("os.path.exists", return_value=False),
+        pytest.raises(BaseException, match=r"index\.html not found"),
+    ):
         func()
 
 
 def test_sqlite_init_exception() -> None:
     """Test 41: Test SQLite initialization failure fallback."""
     from backend.api import routes
+
     with patch("os.makedirs", side_effect=Exception("Permission denied")):
         result = routes._init_db()
         assert result is False
@@ -745,19 +816,37 @@ def test_generate_mock_playbook_branches() -> None:
 
     gates = [
         GateStatus(gate_id="North-A", capacity_percent=90.0, entry_rate=45, wait_time_seconds=340),
-        GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45)
+        GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45),
     ]
-    event_ctx = EventContext(phase="halftime", total_capacity=60000, occupied_seats=50000, accessible_seats_available=10, concession_queue_avg_minutes=5)
+    event_ctx = EventContext(
+        phase="halftime",
+        total_capacity=60000,
+        occupied_seats=50000,
+        accessible_seats_available=10,
+        concession_queue_avg_minutes=5,
+    )
 
     # 1. test fire_smoke branch
-    inc_fire = IncidentReport(incident_id="INC-1", zone="B3", type="fire_smoke", description="smoke in B3", reporter_role="steward")
-    weather_clear = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0)
+    inc_fire = IncidentReport(
+        incident_id="INC-1",
+        zone="B3",
+        type="fire_smoke",
+        description="smoke in B3",
+        reporter_role="steward",
+    )
+    weather_clear = WeatherContext(
+        temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0
+    )
     pb_fire = _generate_mock_playbook(gates, inc_fire, weather_clear, event_ctx)
     assert "evacuation" in pb_fire["summary"].lower()
 
     # 2. test lightning branch
-    inc_med = IncidentReport(incident_id="INC-2", zone="B3", type="medical", description="heat", reporter_role="steward")
-    weather_lightning = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=True, lightning_radius_km=10.0)
+    inc_med = IncidentReport(
+        incident_id="INC-2", zone="B3", type="medical", description="heat", reporter_role="steward"
+    )
+    weather_lightning = WeatherContext(
+        temperature_celsius=25, heat_index=26, lightning_detected=True, lightning_radius_km=10.0
+    )
     pb_weather = _generate_mock_playbook(gates, inc_med, weather_lightning, event_ctx)
     assert "lightning" in pb_weather["summary"].lower()
 
@@ -769,27 +858,51 @@ def test_generate_mock_chat_branches() -> None:
 
     gates = [
         GateStatus(gate_id="North-A", capacity_percent=90.0, entry_rate=45, wait_time_seconds=340),
-        GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45)
+        GateStatus(gate_id="South-A", capacity_percent=20.0, entry_rate=8, wait_time_seconds=45),
     ]
-    incident = IncidentReport(incident_id="INC-1", zone="B3", type="medical", description="collapsed", reporter_role="steward")
-    event_ctx = EventContext(phase="halftime", total_capacity=60000, occupied_seats=50000, accessible_seats_available=10, concession_queue_avg_minutes=5)
+    incident = IncidentReport(
+        incident_id="INC-1",
+        zone="B3",
+        type="medical",
+        description="collapsed",
+        reporter_role="steward",
+    )
+    event_ctx = EventContext(
+        phase="halftime",
+        total_capacity=60000,
+        occupied_seats=50000,
+        accessible_seats_available=10,
+        concession_queue_avg_minutes=5,
+    )
 
     # 1. fire / evac
-    weather_clear = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0)
-    reply_fire = _generate_mock_chat("fire evacuation protocol", [], gates, incident, weather_clear, event_ctx)
+    weather_clear = WeatherContext(
+        temperature_celsius=25, heat_index=26, lightning_detected=False, lightning_radius_km=0
+    )
+    reply_fire = _generate_mock_chat(
+        "fire evacuation protocol", [], gates, incident, weather_clear, event_ctx
+    )
     assert "evacuation" in reply_fire.lower()
 
     # 2. weather/lightning
-    weather_lightning = WeatherContext(temperature_celsius=25, heat_index=26, lightning_detected=True, lightning_radius_km=10.0)
-    reply_weather = _generate_mock_chat("lightning warning status", [], gates, incident, weather_lightning, event_ctx)
+    weather_lightning = WeatherContext(
+        temperature_celsius=25, heat_index=26, lightning_detected=True, lightning_radius_km=10.0
+    )
+    reply_weather = _generate_mock_chat(
+        "lightning warning status", [], gates, incident, weather_lightning, event_ctx
+    )
     assert "lightning" in reply_weather.lower()
 
     # 3. gate / redirect
-    reply_gate = _generate_mock_chat("gate redirection", [], gates, incident, weather_clear, event_ctx)
+    reply_gate = _generate_mock_chat(
+        "gate redirection", [], gates, incident, weather_clear, event_ctx
+    )
     assert "overloaded" in reply_gate.lower()
 
     # 4. weather but no lightning detected path
-    reply_no_lightning = _generate_mock_chat("lightning storm check", [], gates, incident, weather_clear, event_ctx)
+    reply_no_lightning = _generate_mock_chat(
+        "lightning storm check", [], gates, incident, weather_clear, event_ctx
+    )
     assert "no lightning" in reply_no_lightning.lower()
 
 
@@ -830,7 +943,9 @@ def test_rate_limit_memory_sweeper() -> None:
 def test_fcm_endpoints() -> None:
     """Test device registration and configuration endpoints."""
     import sqlite3
+
     from backend.core.fcm import DB_PATH, is_sqlite_enabled
+
     if is_sqlite_enabled():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -856,9 +971,16 @@ def test_fcm_endpoints() -> None:
 @pytest.mark.asyncio
 async def test_send_fcm_notification_integration() -> None:
     """Verify that send_fcm_notification works via Firebase Admin SDK and cleans up stale tokens."""
-    from backend.core.fcm import add_token, get_tokens, send_fcm_notification, DB_PATH, is_sqlite_enabled
-    from unittest.mock import MagicMock, patch
     import sqlite3
+    from unittest.mock import MagicMock, patch
+
+    from backend.core.fcm import (
+        DB_PATH,
+        add_token,
+        get_tokens,
+        is_sqlite_enabled,
+        send_fcm_notification,
+    )
 
     if is_sqlite_enabled():
         conn = sqlite3.connect(DB_PATH)
@@ -869,6 +991,7 @@ async def test_send_fcm_notification_integration() -> None:
 
     # Reset singleton
     import backend.core.fcm as fcm_module
+
     fcm_module._firebase_app = MagicMock()
 
     # Add tokens
@@ -880,7 +1003,7 @@ async def test_send_fcm_notification_integration() -> None:
 
     def mock_send(msg):
         """Raise UnregisteredError for test-token-2 to simulate stale token."""
-        if msg.token == "test-token-2":
+        if msg.token == "test-token-2":  # noqa: S105
             raise messaging.UnregisteredError("Token not registered")
         return "projects/test/messages/ok"
 
@@ -891,5 +1014,3 @@ async def test_send_fcm_notification_integration() -> None:
     tokens = get_tokens()
     assert "test-token-1" in tokens
     assert "test-token-2" not in tokens
-
-

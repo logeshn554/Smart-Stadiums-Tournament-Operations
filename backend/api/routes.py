@@ -20,17 +20,16 @@ Security measures:
 import json
 import logging
 import os
-import re
 import sqlite3
 import time
 from collections import defaultdict
+from contextlib import closing
 from datetime import UTC, datetime
-from html.parser import HTMLParser
 from typing import Any, Final
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-
 from pydantic import BaseModel, Field
+
 from backend.core.auth import verify_token
 from backend.core.decision_engine import (
     accessibility_routing,
@@ -59,8 +58,12 @@ from backend.models.schemas import (
     SeverityLevel,
 )
 
+
 class FCMRegisterRequest(BaseModel):
+    """Pydantic model representing a request to register an FCM device token."""
+
     token: str = Field(..., min_length=1, description="FCM device token")
+
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,7 @@ _REDIS_URL = os.getenv("REDIS_URL")
 if _REDIS_URL:
     try:
         import redis as _redis_module
+
         _redis_client = _redis_module.from_url(_REDIS_URL, decode_responses=True)
         _redis_client.ping()
         logger.info("Rate limiter: using Redis backend at %s", _REDIS_URL)
@@ -116,14 +120,15 @@ def _sweep_rate_limit_store() -> None:
     This prevents unbounded dictionary growth in long-running
     single-process deployments.
     """
-    global _last_sweep_time  # noqa: PLW0603
+    global _last_sweep_time
     now = time.time()
     if now - _last_sweep_time < _SWEEP_INTERVAL_SECONDS:
         return
 
     window_start = now - RATE_LIMIT_WINDOW_SECONDS
     stale_keys = [
-        ip for ip, timestamps in _rate_limit_store.items()
+        ip
+        for ip, timestamps in _rate_limit_store.items()
         if not any(ts > window_start for ts in timestamps)
     ]
     for key in stale_keys:
@@ -131,7 +136,8 @@ def _sweep_rate_limit_store() -> None:
 
     if stale_keys:
         logger.info(
-            "Rate-limit sweeper: removed %d inactive IP(s).", len(stale_keys),
+            "Rate-limit sweeper: removed %d inactive IP(s).",
+            len(stale_keys),
         )
     _last_sweep_time = now
 
@@ -154,6 +160,7 @@ _DB_DIR = os.path.join(
 )
 _DB_PATH = os.path.join(_DB_DIR, "audit_log.db")
 
+
 def _init_db() -> bool:
     """Initialize the SQLite database for audit logging.
 
@@ -164,31 +171,37 @@ def _init_db() -> bool:
     """
     try:
         os.makedirs(_DB_DIR, exist_ok=True)
-        conn = sqlite3.connect(_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                venue_id TEXT NOT NULL,
-                source TEXT NOT NULL,
-                incident_id TEXT NOT NULL,
-                zone TEXT NOT NULL,
-                type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                reporter_role TEXT NOT NULL
+        with closing(sqlite3.connect(_DB_PATH)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    venue_id TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    incident_id TEXT NOT NULL,
+                    zone TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    reporter_role TEXT NOT NULL
+                )
+            """
             )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fcm_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                token TEXT UNIQUE NOT NULL,
-                registered_at TEXT NOT NULL
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fcm_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token TEXT UNIQUE NOT NULL,
+                    registered_at TEXT NOT NULL
+                )
+            """
             )
-        """)
-        conn.commit()
-        conn.close()
-        logger.info("Audit log and FCM tokens SQLite database initialized successfully at %s", _DB_PATH)
+            conn.commit()
+        logger.info(
+            "Audit log and FCM tokens SQLite database initialized successfully at %s",
+            _DB_PATH,
+        )
         return True
     except Exception as exc:
         logger.error(
@@ -197,6 +210,7 @@ def _init_db() -> bool:
             exc,
         )
         return False
+
 
 _sqlite_enabled = _init_db()
 
@@ -236,8 +250,7 @@ def _get_current_user(request: Request) -> dict[str, Any] | None:
 
     token = auth_header.split("Bearer ", 1)[1]
     try:
-        payload = verify_token(token)
-        return payload
+        return verify_token(token)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -285,9 +298,7 @@ def _check_rate_limit(client_ip: str) -> None:
 
     # In-memory fallback
     window_start = now - RATE_LIMIT_WINDOW_SECONDS
-    _rate_limit_store[client_ip] = [
-        ts for ts in _rate_limit_store[client_ip] if ts > window_start
-    ]
+    _rate_limit_store[client_ip] = [ts for ts in _rate_limit_store[client_ip] if ts > window_start]
 
     if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX:
         logger.warning("Rate limit exceeded for IP: %s", client_ip)
@@ -302,33 +313,12 @@ def _check_rate_limit(client_ip: str) -> None:
     _rate_limit_store[client_ip].append(now)
 
 
-class _HTMLTagStripper(HTMLParser):
-    """HTMLParser subclass that collects only the raw text content of an HTML document.
-
-    Using the standard-library parser avoids regex-evasion vulnerabilities
-    (e.g. unclosed angle brackets, null-byte injection, or deeply nested tags)
-    that a simple ``re.sub`` cannot reliably handle.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:  # type: ignore[override]
-        self._parts.append(data)
-
-    def get_text(self) -> str:
-        return "".join(self._parts)
-
-
 def _sanitize_description(description: str) -> str:
-    """Strip HTML tags from a description string using the standard-library HTML parser.
+    """Strip HTML tags from a description string (defense-in-depth).
 
-    Uses ``html.parser.HTMLParser`` to extract only the raw text content,
-    providing stronger protection than regex-based approaches against
-    evasion patterns such as unclosed tags or embedded null bytes.
-    This provides defense-in-depth alongside the Pydantic-level
-    validator in the IncidentReport schema.
+    Reuses the ``_HTMLTagStripper`` from ``backend.models.schemas`` to
+    avoid duplicating the parser.  This provides a second sanitisation
+    layer alongside the Pydantic-level field validator.
 
     Args:
         description: Raw description text potentially containing HTML.
@@ -336,6 +326,8 @@ def _sanitize_description(description: str) -> str:
     Returns:
         Cleaned string with all HTML tags removed.
     """
+    from backend.models.schemas import _HTMLTagStripper
+
     stripper = _HTMLTagStripper()
     stripper.feed(description)
     sanitised = stripper.get_text()
@@ -387,26 +379,27 @@ def _append_audit_entry(venue_id: str, incident: IncidentReport, source: str) ->
 
     if _sqlite_enabled:
         try:
-            conn = sqlite3.connect(_DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO audit_log (
-                    timestamp, venue_id, source, incident_id, zone, type,
-                    description, reporter_role
+            with closing(sqlite3.connect(_DB_PATH)) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO audit_log (
+                        timestamp, venue_id, source, incident_id, zone, type,
+                        description, reporter_role
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        timestamp_str,
+                        venue_id,
+                        source,
+                        incident.incident_id,
+                        incident.zone,
+                        incident.type,
+                        incident.description,
+                        incident.reporter_role,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                timestamp_str,
-                venue_id,
-                source,
-                incident.incident_id,
-                incident.zone,
-                incident.type,
-                incident.description,
-                incident.reporter_role
-            ))
-            conn.commit()
-            conn.close()
+                conn.commit()
             logger.info(
                 "Audit log: recorded %s via SQLite for venue %s",
                 incident.incident_id,
@@ -443,11 +436,13 @@ async def _broadcast_ws(recommendations: list[Recommendation]) -> None:
     if not _ws_connections:
         return
 
-    payload = json.dumps({
-        "type": "recommendations_update",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "recommendations": [r.model_dump() for r in recommendations],
-    })
+    payload = json.dumps(
+        {
+            "type": "recommendations_update",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "recommendations": [r.model_dump() for r in recommendations],
+        }
+    )
 
     disconnected: list[WebSocket] = []
     for ws in _ws_connections:
@@ -490,16 +485,11 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
     # ── Determine effective role (JWT takes precedence) ──
     jwt_payload = _get_current_user(request)
     effective_role = (
-        CallerRole(jwt_payload["role"])
-        if jwt_payload and "role" in jwt_payload
-        else payload.role
+        CallerRole(jwt_payload["role"]) if jwt_payload and "role" in jwt_payload else payload.role
     )
 
     # ── RBAC: viewers cannot submit Critical-level incident types ──
-    if (
-        effective_role == CallerRole.VIEWER
-        and payload.incident.type in CRITICAL_INCIDENT_TYPES
-    ):
+    if effective_role == CallerRole.VIEWER and payload.incident.type in CRITICAL_INCIDENT_TYPES:
         logger.warning(
             "Viewer attempted to submit critical incident type: %s",
             payload.incident.type,
@@ -513,9 +503,7 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
         )
 
     # ── Sanitize incident description (defense-in-depth) ──
-    payload.incident.description = _sanitize_description(
-        payload.incident.description
-    )
+    payload.incident.description = _sanitize_description(payload.incident.description)
 
     # ── Run all five rules ──
     all_recommendations: list[Recommendation] = []
@@ -523,12 +511,8 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
     all_recommendations.extend(gate_load_balance(payload.gates))
     all_recommendations.append(triage_incident(payload.incident))
     all_recommendations.extend(weather_action(payload.weather))
-    all_recommendations.extend(
-        accessibility_routing(payload.event_context, payload.incident)
-    )
-    all_recommendations.extend(
-        egress_plan(payload.event_context, payload.gates)
-    )
+    all_recommendations.extend(accessibility_routing(payload.event_context, payload.incident))
+    all_recommendations.extend(egress_plan(payload.event_context, payload.gates))
 
     sorted_recommendations = _sort_recommendations(all_recommendations)
 
@@ -539,12 +523,16 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
     await _broadcast_ws(sorted_recommendations)
 
     # ── Trigger FCM alerts for Critical and High severity alerts ──
-    high_critical = [r for r in sorted_recommendations if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)]
+    high_critical = [
+        r
+        for r in sorted_recommendations
+        if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)
+    ]
     if high_critical:
         first = high_critical[0]
         await send_fcm_notification(
             title=f"StadiumOps Alert: {first.severity}",
-            body=f"{first.action} (Zone: {first.affected_zone})"
+            body=f"{first.action} (Zone: {first.affected_zone})",
         )
 
     logger.info(
@@ -558,9 +546,7 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
 
 
 @router.post("/incident")
-async def incident_endpoint(
-    report: IncidentReport, request: Request
-) -> dict[str, Any]:
+async def incident_endpoint(report: IncidentReport, request: Request) -> dict[str, Any]:
     """Triage a single incident and return accessibility-aware recommendations.
 
     Rate-limited to 10 requests per minute per IP address.
@@ -604,12 +590,16 @@ async def incident_endpoint(
     await _broadcast_ws(sorted_recommendations)
 
     # ── Trigger FCM alerts for Critical and High severity alerts ──
-    high_critical = [r for r in sorted_recommendations if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)]
+    high_critical = [
+        r
+        for r in sorted_recommendations
+        if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)
+    ]
     if high_critical:
         first = high_critical[0]
         await send_fcm_notification(
             title=f"StadiumOps Incident Alert: {first.severity}",
-            body=f"{first.action} (Zone: {first.affected_zone})"
+            body=f"{first.action} (Zone: {first.affected_zone})",
         )
 
     logger.info(
@@ -647,29 +637,33 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
     """
     if _sqlite_enabled:
         try:
-            conn = sqlite3.connect(_DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT timestamp, source, incident_id, zone, type, description, reporter_role
-                FROM audit_log
-                WHERE venue_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-            """, (venue_id, MAX_AUDIT_ENTRIES))
-            rows = cursor.fetchall()
-            conn.close()
+            with closing(sqlite3.connect(_DB_PATH)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT timestamp, source, incident_id, zone, type,
+                           description, reporter_role
+                    FROM audit_log
+                    WHERE venue_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                """,
+                    (venue_id, MAX_AUDIT_ENTRIES),
+                ).fetchall()
 
-            entries = []
-            for r in reversed(rows):
-                entries.append({
-                    "timestamp": r[0],
-                    "source": r[1],
-                    "incident_id": r[2],
-                    "zone": r[3],
-                    "type": r[4],
-                    "description": r[5],
-                    "reporter_role": r[6],
-                })
+            # Build list using named column access (sqlite3.Row)
+            entries = [
+                {
+                    "timestamp": r["timestamp"],
+                    "source": r["source"],
+                    "incident_id": r["incident_id"],
+                    "zone": r["zone"],
+                    "type": r["type"],
+                    "description": r["description"],
+                    "reporter_role": r["reporter_role"],
+                }
+                for r in reversed(rows)
+            ]
 
             logger.info(
                 "audit_endpoint: returning %d entries from SQLite for venue %s",
@@ -698,9 +692,7 @@ async def audit_endpoint(venue_id: str = "default") -> dict[str, Any]:
 
 
 @router.post("/genai/playbook", response_model=PlaybookResponse)
-async def genai_playbook_endpoint(
-    payload: AnalyzeRequest, request: Request
-) -> dict[str, Any]:
+async def genai_playbook_endpoint(payload: AnalyzeRequest, request: Request) -> dict[str, Any]:
     """Generate a dynamic control room playbook and announcements using Generative AI.
 
     Accepts the same payload as /api/analyze. Reads optional X-Gemini-API-Key header.
@@ -709,20 +701,17 @@ async def genai_playbook_endpoint(
     _check_rate_limit(client_ip)
 
     api_key = request.headers.get("X-Gemini-API-Key")
-    playbook = await generate_briefing_and_playbook(
+    return await generate_briefing_and_playbook(
         gates=payload.gates,
         incident=payload.incident,
         weather=payload.weather,
         event_context=payload.event_context,
         api_key=api_key,
     )
-    return playbook
 
 
 @router.post("/genai/chat", response_model=ChatResponse)
-async def genai_chat_endpoint(
-    payload: ChatRequest, request: Request
-) -> dict[str, Any]:
+async def genai_chat_endpoint(payload: ChatRequest, request: Request) -> dict[str, Any]:
     """Provide interactive decision support chat for control room operators.
 
     Reads optional X-Gemini-API-Key header.
