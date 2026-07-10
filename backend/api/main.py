@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.api.routes import router
 
@@ -91,7 +92,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Gemini-API-Key"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -147,10 +148,16 @@ async def add_security_headers(
     # trusted internal network. script-src remains strict 'self' only.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' https://www.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
-        "connect-src 'self' ws: wss:"
+        "img-src 'self' data:; "
+        "connect-src 'self' ws: wss: "
+        "https://generativelanguage.googleapis.com "
+        "https://fcm.googleapis.com "
+        "https://firebaseinstallations.googleapis.com "
+        "https://identitytoolkit.googleapis.com "
+        "https://www.gstatic.com"
     )
     return response
 
@@ -159,6 +166,17 @@ async def add_security_headers(
 
 app.include_router(router)
 
+# ── Serve frontend static files ───────────────────────────────────────────
+# Mount the frontend directory so the dashboard is accessible at http://127.0.0.1:8000
+_frontend_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "frontend"
+)
+if os.path.isdir(_frontend_path):
+    app.mount("/", StaticFiles(directory=_frontend_path, html=True), name="frontend")
+    logger.info("Frontend static files mounted from: %s", _frontend_path)
+
+# Trigger server reload to read updated .env config
 logger.info(
     "StadiumOps AI started. CORS origins: %s",
     allowed_origins,

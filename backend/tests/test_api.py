@@ -519,38 +519,22 @@ def test_extra_claims_and_keypair_generation() -> None:
 
 @pytest.mark.asyncio
 async def test_genai_real_api_mocked() -> None:
-    """Test 31: Test real Gemini API paths under mocked httpx response."""
+    """Test 31: Test real Gemini API paths under mocked google-genai response."""
     from backend.core.genai import chat_with_assistant, generate_briefing_and_playbook
+    from unittest.mock import patch, MagicMock
 
     mock_playbook_response = MagicMock()
-    mock_playbook_response.status_code = 200
-    mock_playbook_response.raise_for_status = MagicMock()
-    mock_playbook_response.json = MagicMock(return_value={
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": '{"summary": "Test summary from Gemini", "steps": ["Mock step 1"], "announcements": {"en": "EN", "es": "ES", "fr": "FR"}}'
-                }]
-            }
-        }]
-    })
+    mock_playbook_response.text = '{"summary": "Test summary from Gemini", "steps": ["Mock step 1"], "announcements": {"en": "EN", "es": "ES", "fr": "FR"}}'
 
     mock_chat_response = MagicMock()
-    mock_chat_response.status_code = 200
-    mock_chat_response.raise_for_status = MagicMock()
-    mock_chat_response.json = MagicMock(return_value={
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": "Gemini interactive assistant reply."
-                }]
-            }
-        }]
-    })
+    mock_chat_response.text = "Gemini interactive assistant reply."
 
-    with patch("httpx.AsyncClient.post") as mock_post:
+    with patch("google.genai.Client") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
         # 1. Test playbook endpoint with key
-        mock_post.return_value = mock_playbook_response
+        mock_client.models.generate_content.return_value = mock_playbook_response
 
         # Test direct playbook generation function
         from backend.models.schemas import EventContext, GateStatus, IncidentReport, WeatherContext
@@ -563,17 +547,18 @@ async def test_genai_real_api_mocked() -> None:
         assert playbook["summary"] == "Test summary from Gemini"
 
         # Test Chat function
-        mock_post.return_value = mock_chat_response
+        mock_client.models.generate_content.return_value = mock_chat_response
         chat_reply = await chat_with_assistant("Hello", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
         assert chat_reply == "Gemini interactive assistant reply."
 
         # 2. Test failure handling in API call (should fallback to mock playbook)
-        mock_post.side_effect = Exception("API Error")
+        mock_client.models.generate_content.side_effect = Exception("API Error")
         playbook_fallback = await generate_briefing_and_playbook(gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
         assert "NORMAL OPERATIONS" in playbook_fallback["summary"] or "HIGH INCIDENT" in playbook_fallback["summary"] or "OPERATIONAL BOTTLENECK" in playbook_fallback["summary"]
 
         chat_fallback = await chat_with_assistant("xyz", [], gates, incident, weather, event_ctx, api_key="TEST_API_KEY")
         assert "Operational Guidance" in chat_fallback
+
 
 
 def test_invalid_authorization_formats_and_exceptions() -> None:

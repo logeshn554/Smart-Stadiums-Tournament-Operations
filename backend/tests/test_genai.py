@@ -255,33 +255,13 @@ class TestGenAIHTTPCalls:
         weather = _valid_weather()
         event = _valid_event()
 
-        mock_response_json = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": '{"summary": "Gemini briefing", "steps": ["Gemini Step 1"], "announcements": {"en": "Gemini hello", "es": "Gemini hola", "fr": "Gemini bonjour"}}'
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
+        from unittest.mock import MagicMock
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = '{"summary": "Gemini briefing", "steps": ["Gemini Step 1"], "announcements": {"en": "Gemini hello", "es": "Gemini hola", "fr": "Gemini bonjour"}}'
+        mock_client.models.generate_content.return_value = mock_response
 
-        # Mock the httpx.AsyncClient.post method
-        class MockResponse:
-            def __init__(self) -> None:
-                self.status_code = 200
-            def raise_for_status(self) -> None:
-                pass
-            def json(self):
-                return mock_response_json
-
-        async def mock_post(self, *args, **kwargs):
-            return MockResponse()
-
-        monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+        monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
         res = await generate_briefing_and_playbook(gates, incident, weather, event, api_key="secret-gemini-key")
         assert res["summary"] == "Gemini briefing"
@@ -295,32 +275,13 @@ class TestGenAIHTTPCalls:
         weather = _valid_weather()
         event = _valid_event()
 
-        mock_response_json = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": "Gemini response to question"
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
+        from unittest.mock import MagicMock
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Gemini response to question"
+        mock_client.models.generate_content.return_value = mock_response
 
-        class MockResponse:
-            def __init__(self) -> None:
-                self.status_code = 200
-            def raise_for_status(self) -> None:
-                pass
-            def json(self):
-                return mock_response_json
-
-        async def mock_post(self, *args, **kwargs):
-            return MockResponse()
-
-        monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+        monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
         res = await chat_with_assistant("Explain lightning protocol", [], gates, incident, weather, event, api_key="secret-gemini-key")
         assert res == "Gemini response to question"
@@ -332,11 +293,13 @@ class TestGenAIHTTPCalls:
         weather = _valid_weather()
         event = _valid_event()
 
-        async def mock_post_fail(self, *args, **kwargs) -> Never:
-            raise httpx.HTTPStatusError("API Error", request=None, response=None)
+        from unittest.mock import MagicMock
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = Exception("API Error")
 
-        monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_fail)
+        monkeypatch.setattr("google.genai.Client", lambda api_key: mock_client)
 
         # Should fall back to mock without raising exception
         res = await generate_briefing_and_playbook(gates, incident, weather, event, api_key="secret-gemini-key")
         assert "HIGH INCIDENT ALERT" in res["summary"]
+

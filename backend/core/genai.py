@@ -1,17 +1,16 @@
 """StadiumOps AI — GenAI Core Module.
 
-Integrates with the Google Gemini API using direct asynchronous HTTP calls via `httpx`.
+Integrates with the Google Gemini API using the official google-genai SDK.
 If a GEMINI_API_KEY is not provided via the request or environment, the module
 falls back to a highly contextual, realistic mock generator to ensure
 out-of-the-box functionality and easy evaluation.
 """
 
+import asyncio
 import json
 import logging
 import os
 from typing import Any
-
-import httpx
 
 from backend.models.schemas import (
     EventContext,
@@ -22,8 +21,7 @@ from backend.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL: str = "gemini-2.5-flash"
-GEMINI_API_URL: str = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+GEMINI_MODEL: str = "gemini-3.1-flash-lite"
 
 
 async def generate_briefing_and_playbook(
@@ -67,21 +65,21 @@ async def generate_briefing_and_playbook(
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{GEMINI_API_URL}?key={effective_api_key}",
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "responseMimeType": "application/json"
-                    }
-                },
-                timeout=20.0,
+        from google import genai
+
+        def _call_api() -> dict[str, Any]:
+            client = genai.Client(api_key=effective_api_key)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
             )
-            response.raise_for_status()
-            res_json = response.json()
-            text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text.strip())
+            text = response.text.strip()
+            # Strip markdown code fences if present
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            return json.loads(text)
+
+        return await asyncio.get_event_loop().run_in_executor(None, _call_api)
     except Exception as exc:
         logger.error("Gemini API call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_playbook(gates, incident, weather, event_context)
@@ -137,17 +135,17 @@ async def chat_with_assistant(
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{GEMINI_API_URL}?key={effective_api_key}",
-                json={
-                    "contents": [{"parts": [{"text": prompt_content}]}],
-                },
-                timeout=20.0,
+        from google import genai
+
+        def _call_api() -> str:
+            client = genai.Client(api_key=effective_api_key)
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt_content,
             )
-            response.raise_for_status()
-            res_json = response.json()
-            return res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return response.text.strip()
+
+        return await asyncio.get_event_loop().run_in_executor(None, _call_api)
     except Exception as exc:
         logger.error("Gemini API chat call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_chat(message, history, gates, incident, weather, event_context)
