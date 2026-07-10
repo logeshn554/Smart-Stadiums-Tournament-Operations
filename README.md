@@ -27,11 +27,11 @@ StadiumOps AI is designed as a GenAI-enabled operational support dashboard for *
    * **Staggered egress plans**: Triggers phased, wave-based egress plans (`egress_plan()`) during post-match or overtime phases to guide crowds to the least-congested transport nodes.
 2. **Accessibility**:
    * **Priority Routing**: Elevates incident triage severity to Critical/High (`accessibility_routing()`) if incidents occur near occupied accessible seating zones.
-   * **WCAG 2.1 AA Compliance**: The operator dashboard features full keyboard navigation, screen reader support, correct ARIA role bindings, and high contrast options.
+   * **Accessibility-focused UI**: The operator dashboard features keyboard navigation, screen reader support, correct ARIA role bindings, and high contrast options.
 3. **Transportation**:
    * Outflow recommendations coordinate directly with public transit hubs, ensuring transit hubs are prepared for wave-based egress surges.
 4. **Sustainability**:
-   * Low-resource server architecture, in-memory rate-limiter sweeps to prevent memory growth, and a dark-themed CSS dashboard that optimizes power consumption.
+   * Low-resource server architecture, in-memory rate-limiter sweeps to prevent memory growth, and a dark-themed CSS dashboard with reduced-motion and high-contrast support.
 5. **Multilingual Assistance**:
    * Generative AI Playbook generates instant translations in the official languages of the FIFA World Cup 2026 host nations (**English, Spanish, and French**) for PA announcements.
 6. **Operational Intelligence**:

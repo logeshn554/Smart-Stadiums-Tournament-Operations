@@ -2,26 +2,40 @@
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
-// These placeholders will be dynamically replaced by the backend server on startup with variables from .env
-const firebaseConfig = {
-    apiKey: "mock-firebase-api-key",
-    authDomain: "stadiumops-ai.firebaseapp.com",
-    projectId: "stadiumops-ai",
-    storageBucket: "stadiumops-ai.appspot.com",
-    messagingSenderId: "63483696880",
-    appId: "1:63483696880:web:63483696880abcdef"
-};
+const CONFIG_ENDPOINT = '/api/fcm/config';
 
-firebase.initializeApp(firebaseConfig);
-const messaging = firebase.messaging();
+function setupMessaging(firebaseConfig) {
+    if (!firebaseConfig.apiKey || !firebaseConfig.messagingSenderId) {
+        console.log('[firebase-messaging-sw.js] Firebase config unavailable. Background alerts disabled.');
+        return;
+    }
 
-messaging.onBackgroundMessage((payload) => {
-    console.log('[firebase-messaging-sw.js] Received background message ', payload);
-    const notificationTitle = payload.notification.title || "StadiumOps Alert";
-    const notificationOptions = {
-        body: payload.notification.body || "",
-        icon: "/favicon.ico"
-    };
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    }
 
-    self.registration.showNotification(notificationTitle, notificationOptions);
-});
+    const messaging = firebase.messaging();
+
+    messaging.onBackgroundMessage((payload) => {
+        console.log('[firebase-messaging-sw.js] Received background message ', payload);
+        const notificationTitle = payload.notification.title || 'StadiumOps Alert';
+        const notificationOptions = {
+            body: payload.notification.body || '',
+            icon: '/favicon.ico'
+        };
+
+        self.registration.showNotification(notificationTitle, notificationOptions);
+    });
+}
+
+fetch(CONFIG_ENDPOINT, { cache: 'no-store' })
+    .then((response) => {
+        if (!response.ok) {
+            throw new Error('Unable to load Firebase config');
+        }
+        return response.json();
+    })
+    .then((firebaseConfig) => setupMessaging(firebaseConfig))
+    .catch((error) => {
+        console.log('[firebase-messaging-sw.js] FCM initialization skipped:', error);
+    });

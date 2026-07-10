@@ -470,8 +470,26 @@ def test_security_headers_present() -> None:
     assert "Content-Security-Policy" in res.headers
 
 
+def test_fcm_config_endpoint_exposes_public_configuration_shape() -> None:
+    """Test 29: FCM config endpoint returns the public Firebase settings expected by the client."""
+    res = client.get("/api/fcm/config")
+    assert res.status_code == 200
+    data = res.json()
+    expected_keys = {
+        "apiKey",
+        "authDomain",
+        "projectId",
+        "storageBucket",
+        "messagingSenderId",
+        "appId",
+        "vapidKey",
+    }
+    assert expected_keys.issubset(data.keys())
+    assert all(isinstance(data[key], str) for key in expected_keys)
+
+
 def test_gzip_compression_active() -> None:
-    """Test 29: Middleware compresses payloads exceeding size threshold."""
+    """Test 30: Middleware compresses payloads exceeding size threshold."""
     # Create large payload that exceeds 1000 bytes
     large_payload = VALID_PAYLOAD.copy()
     large_payload["incident"]["description"] = "A" * 1500
