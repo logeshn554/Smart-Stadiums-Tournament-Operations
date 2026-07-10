@@ -962,9 +962,73 @@
         });
     }
 
+    // ── WebSocket Real-Time Connection ────────────────────────────────────
+
+    var ws = null;
+    function connectWebSocket() {
+        var wsUrl;
+        if (API_BASE_URL.startsWith("http://")) {
+            wsUrl = API_BASE_URL.replace("http://", "ws://") + "/api/ws";
+        } else if (API_BASE_URL.startsWith("https://")) {
+            wsUrl = API_BASE_URL.replace("https://", "wss://") + "/api/ws";
+        } else {
+            wsUrl = "ws://127.0.0.1:8000/api/ws";
+        }
+
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function () {
+            console.log("[StadiumOps AI] WebSocket connected");
+            var label = autoRefreshIndicator.querySelector("span:not(.spinner)");
+            if (label) {
+                label.textContent = "Live: Connected";
+            }
+            autoRefreshIndicator.classList.add("active");
+
+            // Disable polling when WS is connected
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+        };
+
+        ws.onmessage = function (event) {
+            try {
+                var data = JSON.parse(event.data);
+                if (data.type === "recommendations_update") {
+                    console.log("[StadiumOps AI] WebSocket update received: ", data.recommendations);
+                    renderRecommendations(data.recommendations);
+                    showToast("Real-time recommendations updated.", "success");
+                }
+            } catch (err) {
+                console.error("[StadiumOps AI] WebSocket message parsing error:", err);
+            }
+        };
+
+        ws.onclose = function () {
+            console.log("[StadiumOps AI] WebSocket disconnected. Falling back to 30s polling.");
+            var label = autoRefreshIndicator.querySelector("span:not(.spinner)");
+            if (label) {
+                label.textContent = "Auto-refresh: 30s";
+            }
+            autoRefreshIndicator.classList.remove("active");
+
+            // Start polling as fallback
+            startAutoRefresh();
+
+            // Reconnect attempt after 5 seconds
+            setTimeout(connectWebSocket, 5000);
+        };
+
+        ws.onerror = function (error) {
+            console.error("[StadiumOps AI] WebSocket error:", error);
+            ws.close();
+        };
+    }
+
     // ── Initialise ───────────────────────────────────────────────────────
 
-    startAutoRefresh();
+    connectWebSocket();
 
     // Check if permission was already granted in past sessions, if so auto-initialize
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
