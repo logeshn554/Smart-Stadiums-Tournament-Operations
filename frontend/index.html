@@ -31,6 +31,12 @@
                 <span>Auto-refresh: 30s</span>
             </div>
 
+            <div class="fcm-alerts-control" id="fcm-alerts-control">
+                <button type="button" class="btn-alerts" id="fcm-alerts-btn" aria-live="polite">
+                    🔔 Enable Live Alerts
+                </button>
+            </div>
+
             <div class="data-mode-toggle" id="data-mode-toggle">
                 <label for="data-mode-select" class="data-mode-label">Data Mode:</label>
                 <select id="data-mode-select" aria-label="Data source mode">
@@ -397,6 +403,9 @@
     <!-- ═══ Toast Container ═════════════════════════════════════════════ -->
     <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
+    <!-- Firebase Compat SDKs (WCAG 2.1 compliant / Broad browser support) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

@@ -355,8 +355,9 @@ def test_audit_log_bounded_capacity() -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_genai_playbook_mock_fallback() -> None:
+def test_genai_playbook_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test 21: Playbook endpoint returns a mock playbook structure when no API key exists."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     res = client.post("/api/genai/playbook", json=VALID_PAYLOAD)
     assert res.status_code == 200
     data = res.json()
@@ -365,8 +366,9 @@ def test_genai_playbook_mock_fallback() -> None:
     assert "announcements" in data
 
 
-def test_genai_chat_mock_fallback() -> None:
+def test_genai_chat_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test 22: Chat endpoint returns a mock response when no API key exists."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     chat_payload = {
         "message": "We have a lost child in Section C.",
         "history": [],
@@ -838,4 +840,73 @@ def test_rate_limit_memory_sweeper() -> None:
     finally:
         routes_module._rate_limit_store.clear()
         routes_module.__dict__["_last_sweep_time"] = original_sweep_time
+
+
+def test_fcm_endpoints() -> None:
+    """Test device registration and configuration endpoints."""
+    import sqlite3
+    from backend.core.fcm import DB_PATH, is_sqlite_enabled
+    if is_sqlite_enabled():
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM fcm_tokens")
+        conn.commit()
+        conn.close()
+
+    # 1. Test registration
+    payload = {"token": "test-device-token-123"}
+    res = client.post("/api/devices/register", json=payload)
+    assert res.status_code == 200
+    assert res.json() == {"status": "registered"}
+
+    # 2. Test configuration endpoint
+    res_config = client.get("/api/fcm/config")
+    assert res_config.status_code == 200
+    config = res_config.json()
+    assert "apiKey" in config
+    assert "projectId" in config
+    assert "messagingSenderId" in config
+
+
+@pytest.mark.asyncio
+async def test_send_fcm_notification_integration() -> None:
+    """Verify that send_fcm_notification works under mock settings and cleans up invalid tokens."""
+    from backend.core.fcm import add_token, get_tokens, send_fcm_notification, DB_PATH, is_sqlite_enabled
+    from unittest.mock import MagicMock, patch
+    import sqlite3
+
+    if is_sqlite_enabled():
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM fcm_tokens")
+        conn.commit()
+        conn.close()
+
+    # Add tokens
+    add_token("test-token-1")
+    add_token("test-token-2")
+    assert "test-token-1" in get_tokens()
+
+    # Mock response from FCM server
+    mock_fcm_response = MagicMock()
+    mock_fcm_response.status_code = 200
+    mock_fcm_response.json = MagicMock(return_value={
+        "multicast_id": 12345,
+        "success": 1,
+        "failure": 1,
+        "results": [
+            {"message_id": "1:ok"},
+            {"error": "NotRegistered"}
+        ]
+    })
+
+    with patch("httpx.AsyncClient.post", return_value=mock_fcm_response), \
+         patch("os.getenv", side_effect=lambda key, default=None: "mock-key" if key == "FCM_SERVER_KEY" else os.environ.get(key, default)):
+        await send_fcm_notification("Test Alert", "Detail")
+
+    # Verify that the NotRegistered token (test-token-2) was deleted, and test-token-1 remains
+    tokens = get_tokens()
+    assert "test-token-1" in tokens
+    assert "test-token-2" not in tokens
+
 

@@ -8,12 +8,32 @@ the decision engine.
 """
 
 import logging
-import re
+from html.parser import HTMLParser
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+class _HTMLTagStripper(HTMLParser):
+    """HTMLParser subclass that extracts plain text from an HTML string.
+
+    Using the standard-library parser is safer than a regular expression
+    because it correctly handles edge cases such as unclosed angle brackets,
+    null bytes, and deeply nested tag structures that can bypass simple
+    ``<[^>]*>`` regexes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:  # type: ignore[override]
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        return "".join(self._parts)
 
 
 class IncidentType(StrEnum):
@@ -115,10 +135,13 @@ class IncidentReport(BaseModel):
         """Remove any HTML tags from the description before validation.
 
         Prevents stored XSS by stripping all angle-bracket markup from
-        the user-supplied incident description.
+        the user-supplied incident description. Uses the standard-library
+        ``html.parser.HTMLParser`` for robust, evasion-resistant sanitisation.
         """
         if isinstance(value, str):
-            sanitised = re.sub(r"<[^>]*>", "", value)
+            stripper = _HTMLTagStripper()
+            stripper.feed(value)
+            sanitised = stripper.get_text()
             if sanitised != value:
                 logger.warning(
                     "HTML tags stripped from incident description input."

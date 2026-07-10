@@ -25,10 +25,12 @@ import sqlite3
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from typing import Any, Final
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from pydantic import BaseModel, Field
 from backend.core.auth import verify_token
 from backend.core.decision_engine import (
     accessibility_routing,
@@ -37,6 +39,7 @@ from backend.core.decision_engine import (
     triage_incident,
     weather_action,
 )
+from backend.core.fcm import add_token, send_fcm_notification
 from backend.core.genai import (
     chat_with_assistant,
     generate_briefing_and_playbook,
@@ -55,6 +58,9 @@ from backend.models.schemas import (
     Recommendation,
     SeverityLevel,
 )
+
+class FCMRegisterRequest(BaseModel):
+    token: str = Field(..., min_length=1, description="FCM device token")
 
 logger = logging.getLogger(__name__)
 
@@ -173,14 +179,21 @@ def _init_db() -> bool:
                 reporter_role TEXT NOT NULL
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fcm_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT UNIQUE NOT NULL,
+                registered_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
         conn.close()
-        logger.info("Audit log SQLite database initialized successfully at %s", _DB_PATH)
+        logger.info("Audit log and FCM tokens SQLite database initialized successfully at %s", _DB_PATH)
         return True
     except Exception as exc:
         logger.error(
             "Failed to initialize SQLite database: %s. Falling back to "
-            "in-memory audit log.",
+            "in-memory audit log and storage.",
             exc,
         )
         return False
@@ -289,10 +302,31 @@ def _check_rate_limit(client_ip: str) -> None:
     _rate_limit_store[client_ip].append(now)
 
 
-def _sanitize_description(description: str) -> str:
-    """Strip HTML tags from a description string.
+class _HTMLTagStripper(HTMLParser):
+    """HTMLParser subclass that collects only the raw text content of an HTML document.
 
-    Applies a regex-based filter to remove all angle-bracket markup.
+    Using the standard-library parser avoids regex-evasion vulnerabilities
+    (e.g. unclosed angle brackets, null-byte injection, or deeply nested tags)
+    that a simple ``re.sub`` cannot reliably handle.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:  # type: ignore[override]
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        return "".join(self._parts)
+
+
+def _sanitize_description(description: str) -> str:
+    """Strip HTML tags from a description string using the standard-library HTML parser.
+
+    Uses ``html.parser.HTMLParser`` to extract only the raw text content,
+    providing stronger protection than regex-based approaches against
+    evasion patterns such as unclosed tags or embedded null bytes.
     This provides defense-in-depth alongside the Pydantic-level
     validator in the IncidentReport schema.
 
@@ -302,7 +336,9 @@ def _sanitize_description(description: str) -> str:
     Returns:
         Cleaned string with all HTML tags removed.
     """
-    sanitised = re.sub(r"<[^>]*>", "", description)
+    stripper = _HTMLTagStripper()
+    stripper.feed(description)
+    sanitised = stripper.get_text()
     if sanitised != description:
         logger.info("HTML tags stripped from incident description at API layer.")
     return sanitised
@@ -502,6 +538,15 @@ async def analyze_endpoint(payload: AnalyzeRequest, request: Request) -> dict[st
     # ── Broadcast via WebSocket ──
     await _broadcast_ws(sorted_recommendations)
 
+    # ── Trigger FCM alerts for Critical and High severity alerts ──
+    high_critical = [r for r in sorted_recommendations if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)]
+    if high_critical:
+        first = high_critical[0]
+        await send_fcm_notification(
+            title=f"StadiumOps Alert: {first.severity}",
+            body=f"{first.action} (Zone: {first.affected_zone})"
+        )
+
     logger.info(
         "analyze_endpoint: returning %d recommendations for role=%s venue=%s",
         len(sorted_recommendations),
@@ -557,6 +602,15 @@ async def incident_endpoint(
 
     # ── Broadcast via WebSocket ──
     await _broadcast_ws(sorted_recommendations)
+
+    # ── Trigger FCM alerts for Critical and High severity alerts ──
+    high_critical = [r for r in sorted_recommendations if r.severity in (SeverityLevel.CRITICAL, SeverityLevel.HIGH)]
+    if high_critical:
+        first = high_critical[0]
+        await send_fcm_notification(
+            title=f"StadiumOps Incident Alert: {first.severity}",
+            body=f"{first.action} (Zone: {first.affected_zone})"
+        )
 
     logger.info(
         "incident_endpoint: type=%s returning %d recommendation(s).",
@@ -654,7 +708,7 @@ async def genai_playbook_endpoint(
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
-    api_key = request.headers.get("X-Groq-API-Key")
+    api_key = request.headers.get("X-Gemini-API-Key")
     playbook = await generate_briefing_and_playbook(
         gates=payload.gates,
         incident=payload.incident,
@@ -676,7 +730,7 @@ async def genai_chat_endpoint(
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
-    api_key = request.headers.get("X-Groq-API-Key")
+    api_key = request.headers.get("X-Gemini-API-Key")
     reply = await chat_with_assistant(
         message=payload.message,
         history=payload.history,
@@ -687,6 +741,27 @@ async def genai_chat_endpoint(
         api_key=api_key,
     )
     return {"reply": reply}
+
+
+@router.post("/devices/register")
+async def register_device(payload: FCMRegisterRequest) -> dict[str, str]:
+    """Register a new FCM device token for push notifications."""
+    add_token(payload.token)
+    return {"status": "registered"}
+
+
+@router.get("/fcm/config")
+async def get_fcm_config() -> dict[str, str]:
+    """Return public Firebase configuration required by the client to register for notifications."""
+    return {
+        "apiKey": os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.getenv("FIREBASE_APP_ID", ""),
+        "vapidKey": os.getenv("FIREBASE_VAPID_KEY", ""),
+    }
 
 
 @router.websocket("/ws")

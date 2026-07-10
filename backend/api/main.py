@@ -33,6 +33,34 @@ logger = logging.getLogger(__name__)
 # ── Load environment variables ────────────────────────────────────────────
 load_dotenv()
 
+# ── Configure FCM Service Worker ──────────────────────────────────────────
+def _configure_service_worker() -> None:
+    sw_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "frontend",
+        "firebase-messaging-sw.js"
+    )
+    if os.path.exists(sw_path):
+        try:
+            with open(sw_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # Replace configuration placeholders with actual env variables
+            content = content.replace("placeholder-api-key", os.getenv("FIREBASE_API_KEY", ""))
+            content = content.replace("placeholder-auth-domain", os.getenv("FIREBASE_AUTH_DOMAIN", ""))
+            content = content.replace("placeholder-project-id", os.getenv("FIREBASE_PROJECT_ID", ""))
+            content = content.replace("placeholder-storage-bucket", os.getenv("FIREBASE_STORAGE_BUCKET", ""))
+            content = content.replace("1234567890", os.getenv("FIREBASE_MESSAGING_SENDER_ID", "1234567890"))
+            content = content.replace("placeholder-app-id", os.getenv("FIREBASE_APP_ID", ""))
+            
+            with open(sw_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.info("Successfully configured FCM service worker with environment credentials.")
+        except Exception as exc:
+            logger.error("Failed to configure FCM service worker: %s", exc)
+
+_configure_service_worker()
+
 # ── Application factory ──────────────────────────────────────────────────
 
 app = FastAPI(

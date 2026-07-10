@@ -32,6 +32,7 @@
     var toastContainer = document.getElementById("toast-container");
     var phaseBadgeText = document.getElementById("phase-badge-text");
     var autoRefreshIndicator = document.getElementById("auto-refresh-indicator");
+    var fcmAlertsBtn = document.getElementById("fcm-alerts-btn");
 
     // ── State ────────────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@
     var debounceTimer = null;
     var lastRenderedRecs = null;
     var chatHistory = [];
+    var fcmInitialized = false;
+    var fcmToken = null;
 
     // ── Severity Configuration ───────────────────────────────────────────
     // Text labels used instead of emoji-only indicators for screen reader
@@ -818,8 +821,160 @@
 
 
 
+    // ── Firebase Cloud Messaging (FCM) Integration ───────────────────────
+
+    /**
+     * Fetch FCM configuration, initialize Firebase, register Service Worker, and request permission.
+     */
+    function initFCM() {
+        if (typeof firebase === "undefined") {
+            console.warn("[StadiumOps AI] Firebase SDK not loaded. Live Alerts disabled.");
+            updateAlertsUI("disabled");
+            return;
+        }
+
+        // Fetch config from backend
+        fetch(API_BASE_URL + "/api/fcm/config")
+            .then(function (res) {
+                if (!res.ok) { throw new Error("Could not retrieve FCM config from server."); }
+                return res.json();
+            })
+            .then(function (config) {
+                if (!config.apiKey || !config.messagingSenderId) {
+                    console.log("[StadiumOps AI] Firebase config is not fully populated in env. Live Alerts disabled.");
+                    updateAlertsUI("disabled");
+                    return;
+                }
+
+                // Initialize Firebase App if not already initialized
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(config);
+                }
+                var messaging = firebase.messaging();
+                fcmInitialized = true;
+
+                // Set up onMessage to show alerts when the app is in the foreground
+                messaging.onMessage(function (payload) {
+                    console.log("[StadiumOps AI] Foreground notification received: ", payload);
+                    showToast(payload.notification.title + ": " + payload.notification.body, "success");
+                });
+
+                // Request permission and token
+                requestNotificationPermission(messaging, config.vapidKey);
+            })
+            .catch(function (error) {
+                console.error("[StadiumOps AI FCM]", error);
+                updateAlertsUI("disabled");
+            });
+    }
+
+    /**
+     * Ask for notification permissions and retrieve current registration token.
+     */
+    function requestNotificationPermission(messaging, vapidKey) {
+        Notification.requestPermission()
+            .then(function (permission) {
+                if (permission === "granted") {
+                    console.log("[StadiumOps AI] Notification permission granted.");
+                    
+                    // Register SW explicitly so it uses correct file location
+                    navigator.serviceWorker.register("firebase-messaging-sw.js")
+                        .then(function (registration) {
+                            messaging.getToken({
+                                serviceWorkerRegistration: registration,
+                                vapidKey: vapidKey
+                            })
+                            .then(function (currentToken) {
+                                if (currentToken) {
+                                    fcmToken = currentToken;
+                                    registerTokenWithBackend(currentToken);
+                                } else {
+                                    console.warn("[StadiumOps AI] No registration token available.");
+                                    updateAlertsUI("inactive");
+                                }
+                            })
+                            .catch(function (err) {
+                                console.error("[StadiumOps AI] Get token error: ", err);
+                                updateAlertsUI("inactive");
+                            });
+                        })
+                        .catch(function (err) {
+                            console.error("[StadiumOps AI] SW registration error: ", err);
+                            updateAlertsUI("inactive");
+                        });
+                } else {
+                    console.warn("[StadiumOps AI] Notification permission denied.");
+                    showToast("Notification permission denied. Live Alerts will be disabled.", "error");
+                    updateAlertsUI("inactive");
+                }
+            });
+    }
+
+    /**
+     * Send FCM registration token to FastAPI backend.
+     */
+    function registerTokenWithBackend(token) {
+        fetch(API_BASE_URL + "/api/devices/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: token })
+        })
+        .then(function (res) {
+            if (!res.ok) { throw new Error("Backend token registration failed."); }
+            return res.json();
+        })
+        .then(function () {
+            console.log("[StadiumOps AI] Device registered successfully with backend.");
+            updateAlertsUI("active");
+        })
+        .catch(function (err) {
+            console.error("[StadiumOps AI] Token registration error: ", err);
+            updateAlertsUI("inactive");
+        });
+    }
+
+    /**
+     * Update the Live Alerts button UI based on current status.
+     * @param {"active"|"inactive"|"disabled"} status - Alerts status
+     */
+    function updateAlertsUI(status) {
+        if (!fcmAlertsBtn) { return; }
+
+        if (status === "active") {
+            fcmAlertsBtn.textContent = "🔔 Live Alerts: Active";
+            fcmAlertsBtn.className = "btn-alerts active";
+            fcmAlertsBtn.disabled = false;
+        } else if (status === "inactive") {
+            fcmAlertsBtn.textContent = "🔔 Enable Live Alerts";
+            fcmAlertsBtn.className = "btn-alerts";
+            fcmAlertsBtn.disabled = false;
+        } else if (status === "disabled") {
+            fcmAlertsBtn.textContent = "🔔 Alerts Unavailable";
+            fcmAlertsBtn.className = "btn-alerts disabled";
+            fcmAlertsBtn.disabled = true;
+        }
+    }
+
+    // Register click event
+    if (fcmAlertsBtn) {
+        fcmAlertsBtn.addEventListener("click", function () {
+            initFCM();
+        });
+    }
+
     // ── Initialise ───────────────────────────────────────────────────────
 
     startAutoRefresh();
+
+    // Check if permission was already granted in past sessions, if so auto-initialize
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        setTimeout(function () {
+            initFCM();
+        }, 1000);
+    } else if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        updateAlertsUI("inactive");
+    } else {
+        updateAlertsUI("disabled");
+    }
 
 })();

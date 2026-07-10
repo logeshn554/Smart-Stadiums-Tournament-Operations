@@ -278,7 +278,7 @@ class TestGenAIHTTPCalls:
             def json(self):
                 return mock_response_json
 
-        async def mock_post(self, url, json, timeout):
+        async def mock_post(self, *args, **kwargs):
             return MockResponse()
 
         monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
@@ -317,7 +317,7 @@ class TestGenAIHTTPCalls:
             def json(self):
                 return mock_response_json
 
-        async def mock_post(self, url, json, timeout):
+        async def mock_post(self, *args, **kwargs):
             return MockResponse()
 
         monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
@@ -332,7 +332,7 @@ class TestGenAIHTTPCalls:
         weather = _valid_weather()
         event = _valid_event()
 
-        async def mock_post_fail(self, url, json, timeout) -> Never:
+        async def mock_post_fail(self, *args, **kwargs) -> Never:
             raise httpx.HTTPStatusError("API Error", request=None, response=None)
 
         monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_fail)

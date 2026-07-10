@@ -1,9 +1,9 @@
 """StadiumOps AI — GenAI Core Module.
 
-Integrates with the Groq API (OpenAI-compatible) using direct asynchronous
-HTTP calls via `httpx`. If a GROQ_API_KEY is not provided via the request
-or environment, the module falls back to a highly contextual, realistic mock
-generator to ensure out-of-the-box functionality and easy evaluation.
+Integrates with the Google Gemini API using direct asynchronous HTTP calls via `httpx`.
+If a GEMINI_API_KEY is not provided via the request or environment, the module
+falls back to a highly contextual, realistic mock generator to ensure
+out-of-the-box functionality and easy evaluation.
 """
 
 import json
@@ -22,8 +22,8 @@ from backend.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL: str = "llama-3.3-70b-versatile"
-GROQ_API_URL: str = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_MODEL: str = "gemini-2.5-flash"
+GEMINI_API_URL: str = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 
 async def generate_briefing_and_playbook(
@@ -35,13 +35,13 @@ async def generate_briefing_and_playbook(
 ) -> dict[str, Any]:
     """Generate a control room briefing, playbook, and multilingual PA announcements.
 
-    Uses Groq (llama-3.3-70b-versatile) if an API key is available, otherwise
-    falls back to contextual mock responses.
+    Uses Gemini 2.5 Flash if an API key is available, otherwise falls back to
+    contextual mock responses.
     """
-    effective_api_key = api_key or os.getenv("GROQ_API_KEY")
+    effective_api_key = api_key or os.getenv("GEMINI_API_KEY")
 
     if not effective_api_key:
-        logger.info("No Groq API key found. Falling back to Mock GenAI Briefing.")
+        logger.info("No Gemini API key found. Falling back to Mock GenAI Briefing.")
         return _generate_mock_playbook(gates, incident, weather, event_context)
 
     prompt = (
@@ -69,31 +69,21 @@ async def generate_briefing_and_playbook(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {effective_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{GEMINI_API_URL}?key={effective_api_key}",
                 json={
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a stadium operations AI. Always respond with valid JSON only.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.7,
-                    "response_format": {"type": "json_object"},
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "responseMimeType": "application/json"
+                    }
                 },
                 timeout=20.0,
             )
             response.raise_for_status()
             res_json = response.json()
-            text = res_json["choices"][0]["message"]["content"]
+            text = res_json["candidates"][0]["content"]["parts"][0]["text"]
             return json.loads(text.strip())
     except Exception as exc:
-        logger.error("Groq API call failed: %s. Falling back to Mock.", exc)
+        logger.error("Gemini API call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_playbook(gates, incident, weather, event_context)
 
 
@@ -108,14 +98,20 @@ async def chat_with_assistant(
 ) -> str:
     """Provide real-time conversational decision support to the control room staff.
 
-    Uses Groq (llama-3.3-70b-versatile) if an API key is available, otherwise
+    Uses Gemini 2.5 Flash if an API key is available, otherwise
     falls back to contextual mock responses.
     """
-    effective_api_key = api_key or os.getenv("GROQ_API_KEY")
+    effective_api_key = api_key or os.getenv("GEMINI_API_KEY")
 
     if not effective_api_key:
-        logger.info("No Groq API key found. Falling back to Mock GenAI Chat.")
+        logger.info("No Gemini API key found. Falling back to Mock GenAI Chat.")
         return _generate_mock_chat(message, history, gates, incident, weather, event_context)
+
+    # Format history for prompt
+    history_str = ""
+    for turn in history:
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        history_str += f"{role}: {turn.get('content')}\n"
 
     system_context = (
         "You are the AI Control Room Assistant for a FIFA World Cup 2026 stadium, helping "
@@ -133,34 +129,27 @@ async def chat_with_assistant(
         "4. Address the user's question directly.\n"
     )
 
-    # Build messages list with history
-    messages: list[dict[str, str]] = [{"role": "system", "content": system_context}]
-    for turn in history:
-        role = turn.get("role", "user")
-        if role in ("user", "assistant"):
-            messages.append({"role": role, "content": turn.get("content", "")})
-    messages.append({"role": "user", "content": message})
+    prompt_content = (
+        f"{system_context}\n"
+        f"Conversation History:\n{history_str}\n"
+        f"User asks: {message}\n"
+        "Assistant:"
+    )
 
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {effective_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{GEMINI_API_URL}?key={effective_api_key}",
                 json={
-                    "model": GROQ_MODEL,
-                    "messages": messages,
-                    "temperature": 0.7,
+                    "contents": [{"parts": [{"text": prompt_content}]}],
                 },
                 timeout=20.0,
             )
             response.raise_for_status()
             res_json = response.json()
-            return res_json["choices"][0]["message"]["content"].strip()
+            return res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as exc:
-        logger.error("Groq API chat call failed: %s. Falling back to Mock.", exc)
+        logger.error("Gemini API chat call failed: %s. Falling back to Mock.", exc)
         return _generate_mock_chat(message, history, gates, incident, weather, event_context)
 
 
